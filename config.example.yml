@@ -1,0 +1,77 @@
+# Copy this file to `config.yml` and edit as needed. Every value below is
+# optional: anything omitted falls back to the built-in defaults shown here,
+# so an empty or missing config.yml reproduces the original behavior.
+
+logging:
+  # One of: DEBUG, INFO, WARNING, ERROR, CRITICAL.
+  level: INFO
+  # Rotating log file size and number of backups kept.
+  max_bytes: 10485760   # 10 MiB
+  backup_count: 5
+  # Optional log file path (relative paths resolve against the project root).
+  # Usually set via LOG_FILE in .env instead.
+  # file: eve-killmap.log
+
+sources:
+  # Upstream endpoints. Placeholders in braces are substituted at runtime.
+  r2z2_sequence_url: https://r2z2.zkillboard.com/ephemeral/sequence.json
+  r2z2_ephemeral_url: https://r2z2.zkillboard.com/ephemeral/{sequence}.json
+  esi_killmail_url: https://esi.evetech.net/killmails/{killmail_id}/{killmail_hash}/
+  zkb_totals_url: https://r2z2.zkillboard.com/history/totals.json
+  zkb_day_url: https://r2z2.zkillboard.com/history/{date}.json
+
+esi:
+  # ESI token-bucket rate limit: rate_limit tokens per rate_limit_window seconds.
+  rate_limit: 3600
+  rate_limit_window: 900
+
+live:
+  # Delay (seconds) between successful live-sequence polls.
+  poll_delay: 0.1
+  # Delay (seconds) after a 404 (sequence not yet published) before retrying.
+  retry_delay: 6.0
+
+recheck:
+  # Re-fetch no-position killmails from ESI to see if they have since gained a
+  # position. Disabled by default; no-position kills are still recorded either
+  # way. Enable only if you want the rechecking pass to run.
+  enabled: false
+  # Seconds between recheck cycles.
+  interval_seconds: 3600
+  # Maximum no-position kills examined per cycle.
+  batch_limit: 500
+
+crosscheck:
+  # Hour (UTC) of the daily cross-check against zKillboard totals.
+  hour: 1
+
+maintenance:
+  # Weekly CLUSTER + ANALYZE: day (0=Monday .. 6=Sunday) and hour (UTC).
+  day: 6
+  hour: 4
+  # Hours (UTC) at which materialized views are refreshed.
+  mv_refresh_hours: [0, 6, 12, 18]
+
+streaming:
+  # Redis stream the FastAPI backend tails for live kill events. This name is a
+  # cross-app contract; do not change it without updating the backend in lockstep.
+  stream_name: kills:live
+  # Maximum number of entries in the stream. This is approximated.
+  stream_max_length: 1000
+  # Interval (seconds, inclusive) before the current time that kills received from
+  # R2Z2 should not be streamed. Set to -1 to disable. For example: if set to 7200,
+  # a kill received from R2Z2 that happened more than 2 hours before the current time
+  # will not be streamed to redis.
+  discard_older_than: 7200
+
+processing:
+  # Rows inserted per batch (used by the backfill script).
+  batch_size: 1000
+
+backfill:
+  # Settings for the standalone backfill.py archival script only.
+  max_retries: 5
+  timeout: 30
+  sleep_between_retries: 2
+  killmail_base_url: https://data.everef.net/killmails
+  day_path: /{year}/killmails-{date}.tar.bz2

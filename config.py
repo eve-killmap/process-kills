@@ -249,7 +249,7 @@ def load_config(
             f"Invalid log level {level!r}; expected one of {sorted(VALID_LOG_LEVELS)}"
         )
 
-    log_file = Path(env.get("LOG_FILE") or log_cfg.get("file") or "eve-killmap.log")
+    log_file = Path(env.get("LOG_FILE") or log_cfg.get("file") or "process-kills.log")
     if not log_file.is_absolute():
         log_file = base_dir / log_file
 

@@ -48,7 +48,7 @@ python main.py --help # show usage and exit
 
 The service creates its schema on startup and runs until it receives `SIGINT`
 or `SIGTERM`. Logs go to the rotating file at `LOG_FILE` (default
-`./eve-killmap.log`) and to stdout.
+`./process-kills.log`) and to stdout.
 
 ## Configuration
 
@@ -64,7 +64,7 @@ reproduces the original behavior, both `config.yml` and `.env` are optional
 | `DATABASE_URL` | PostgreSQL connection string (required to run).               |
 | `REDIS_URL`    | Redis connection string for the live stream (default `redis://localhost:6379`). |
 | `USER_AGENT`   | Contact-bearing User-Agent for ESI/zKillboard (CCP rule).     |
-| `LOG_FILE`     | Log file path (default `./eve-killmap.log`).                  |
+| `LOG_FILE`     | Log file path (default `./process-kills.log`).                |
 | `LOG_LEVEL`    | Optional override of `logging.level` from `config.yml`.       |
 | `DATA_DIR`     | Working directory for the backfill script (default `./data`). |
 

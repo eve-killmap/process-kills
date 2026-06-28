@@ -10,7 +10,7 @@ logging:
   backup_count: 5
   # Optional log file path (relative paths resolve against the project root).
   # Usually set via LOG_FILE in .env instead.
-  # file: eve-killmap.log
+  # file: process-kills.log
 
 sources:
   # Upstream endpoints. Placeholders in braces are substituted at runtime.

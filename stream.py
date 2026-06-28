@@ -26,7 +26,7 @@ async def connect_redis() -> aioredis.Redis:
 async def publish_kill(client: aioredis.Redis, parsed: Mapping[str, Any]) -> None:
     if config.streaming.discard_older_than > 0:
         current_epoch = int(time.time())
-        diff = current_epoch - parsed["killmail_time"]
+        diff = current_epoch - int(parsed["killmail_time"])
         if diff >= config.streaming.discard_older_than:
             return
 

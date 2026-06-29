@@ -63,6 +63,10 @@ streaming:
   # a kill received from R2Z2 that happened more than 2 hours before the current time
   # will not be streamed to redis.
   discard_older_than: 7200
+  # Redis pub/sub channel the FastAPI backend listens on to evict its response
+  # caches after a materialized-view refresh. Cross-app contract; must match the
+  # backend's streaming.invalidate_channel. Do not change without updating it.
+  invalidate_channel: cache:invalidate
 
 processing:
   # Rows inserted per batch (used by the backfill script).

@@ -67,8 +67,8 @@ async def main() -> None:
     tasks = [
         live_listener(shutdown_event, live_paused, redis=redis_client),
         crosscheck_scheduler(esi_client, shutdown_event),
-        maintenance_scheduler(shutdown_event, live_paused),
-        mv_refresh_scheduler(shutdown_event),
+        maintenance_scheduler(shutdown_event, live_paused, redis=redis_client),
+        mv_refresh_scheduler(shutdown_event, redis=redis_client),
     ]
     if config.recheck.enabled:
         tasks.append(no_position_rechecking(esi_client, shutdown_event))

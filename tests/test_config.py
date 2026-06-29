@@ -33,6 +33,7 @@ def test_defaults_used_when_no_yaml_and_empty_env(tmp_path):
     assert cfg.streaming.stream_name == "kills:live"
     assert cfg.streaming.stream_max_length == 1000
     assert cfg.streaming.discard_older_than == 7200
+    assert cfg.streaming.invalidate_channel == "cache:invalidate"
     assert cfg.processing.batch_size == 1000
     assert cfg.recheck.enabled is False
     assert cfg.database_url is None
@@ -178,6 +179,15 @@ def test_streaming_max_length_above_max_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "streaming:\n  stream_max_length: 10000\n")
     with pytest.raises(ConfigError, match="stream_max_length"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_invalidate_channel_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.streaming.invalidate_channel == "cache:invalidate"
+
+    yaml_path = write_yaml(tmp_path, "streaming:\n  invalidate_channel: cache:flush\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.streaming.invalidate_channel == "cache:flush"
 
 
 def test_negative_batch_size_raises(tmp_path):

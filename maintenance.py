@@ -13,8 +13,11 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
+import redis.asyncio as aioredis
+
 from config import config
 from db import get_connection
+from stream import publish_invalidation
 
 _MATERIALIZED_VIEWS = [
     "mv_kills_per_system_top",
@@ -36,6 +39,7 @@ logger = logging.getLogger(__name__)
 async def maintenance_scheduler(
     shutdown_event: asyncio.Event,
     live_paused: asyncio.Event,
+    redis: aioredis.Redis | None = None,
 ) -> None:
     logger.info(
         f"Maintenance scheduler started. "
@@ -57,6 +61,8 @@ async def maintenance_scheduler(
 
         try:
             await _run_maintenance(live_paused)
+            if redis is not None:
+                await publish_invalidation(redis, ["farthest_kill"])
         except Exception as e:
             logger.error(f"Maintenance error: {e}", exc_info=True)
 
@@ -92,7 +98,10 @@ async def _run_maintenance(live_paused: asyncio.Event) -> None:
         live_paused.clear()
 
 
-async def mv_refresh_scheduler(shutdown_event: asyncio.Event) -> None:
+async def mv_refresh_scheduler(
+    shutdown_event: asyncio.Event,
+    redis: aioredis.Redis | None = None,
+) -> None:
     hours = ", ".join(f"{h:02d}:00" for h in config.maintenance.mv_refresh_hours)
     logger.info(f"Materialized view refresh scheduler started. Runs at {hours} UTC.")
 
@@ -115,6 +124,8 @@ async def mv_refresh_scheduler(shutdown_event: asyncio.Event) -> None:
             await asyncio.get_event_loop().run_in_executor(
                 None, _refresh_materialized_views
             )
+            if redis is not None:
+                await publish_invalidation(redis, ["system_rankings"])
         except Exception as e:
             logger.error(f"Materialized view refresh error: {e}", exc_info=True)
 

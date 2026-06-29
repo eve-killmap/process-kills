@@ -34,6 +34,17 @@ async def connect_redis() -> aioredis.Redis:
     return client
 
 
+async def publish_invalidation(client: aioredis.Redis, targets: list[str]) -> None:
+    try:
+        await client.publish(
+            config.streaming.invalidate_channel,
+            json.dumps({"targets": targets}),
+        )
+        logger.info("Published cache invalidation: %s", targets)
+    except Exception as e:
+        logger.warning("Failed to publish cache invalidation %s: %s", targets, e)
+
+
 async def publish_kill(client: aioredis.Redis, parsed: Mapping[str, Any]) -> None:
     if config.streaming.discard_older_than > 0:
         killmail_epoch = _killmail_epoch(parsed["killmail_time"])

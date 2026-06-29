@@ -118,6 +118,7 @@ class StreamingConfig:
     stream_name: str
     stream_max_length: int
     discard_older_than: int
+    invalidate_channel: str
 
 
 @dataclass(frozen=True)
@@ -335,6 +336,7 @@ def load_config(
         discard_older_than=_as_int(
             stream_cfg.get("discard_older_than", 7200), "streaming.discard_older_than"
         ),
+        invalidate_channel=stream_cfg.get("invalidate_channel", "cache:invalidate"),
     )
 
     processing_config = ProcessingConfig(

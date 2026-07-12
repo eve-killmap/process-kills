@@ -1,7 +1,8 @@
 """Redis Streams publisher for live killmail events.
 
 Publishes freshly inserted kills to the ``kills:live`` stream so the FastAPI
-backend can tail it and push events to connected clients.
+backend can tail it and push events to connected clients, and publishes
+cache-invalidation messages after materialized-view refreshes.
 """
 
 import json
@@ -13,12 +14,13 @@ from typing import Any
 
 import redis.asyncio as aioredis
 
+import metrics
 from config import config
 
 logger = logging.getLogger(__name__)
 
 
-def _killmail_epoch(killmail_time: str) -> float | None:
+def killmail_epoch(killmail_time: str) -> float | None:
     try:
         dt = datetime.fromisoformat(killmail_time.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
@@ -41,16 +43,21 @@ async def publish_invalidation(client: aioredis.Redis, targets: list[str]) -> No
             json.dumps({"targets": targets}),
         )
         logger.info("Published cache invalidation: %s", targets)
+        for target in targets:
+            metrics.cache_invalidations_published.labels(target, "success").inc()
     except Exception as e:
         logger.warning("Failed to publish cache invalidation %s: %s", targets, e)
+        for target in targets:
+            metrics.cache_invalidations_published.labels(target, "failed").inc()
 
 
 async def publish_kill(client: aioredis.Redis, parsed: Mapping[str, Any]) -> None:
     if config.streaming.discard_older_than > 0:
-        killmail_epoch = _killmail_epoch(parsed["killmail_time"])
-        if killmail_epoch is not None:
-            age = time.time() - killmail_epoch
+        epoch = killmail_epoch(parsed["killmail_time"])
+        if epoch is not None:
+            age = time.time() - epoch
             if age >= config.streaming.discard_older_than:
+                metrics.stream_kills_discarded.inc()
                 return
 
     try:
@@ -60,5 +67,7 @@ async def publish_kill(client: aioredis.Redis, parsed: Mapping[str, Any]) -> Non
             maxlen=config.streaming.stream_max_length,
             approximate=True,
         )
+        metrics.stream_publishes.labels("success").inc()
     except Exception as e:
+        metrics.stream_publishes.labels("failed").inc()
         logger.warning(f"Failed to publish kill {parsed['killmail_id']} to stream: {e}")

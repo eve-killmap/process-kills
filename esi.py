@@ -13,6 +13,7 @@ from typing import Any
 
 import aiohttp
 
+import metrics
 from config import config
 from schema import ParsedKill
 
@@ -69,6 +70,7 @@ class ESIClient:
             self._bucket_size, self._tokens + elapsed * self._refill_rate
         )
         self._last_refill = now
+        metrics.esi_rate_limit_tokens.set(self._tokens)
 
     def _update_rate_limit(self, headers: Mapping[str, str]) -> None:
         """Update token state from ESI response headers."""
@@ -89,6 +91,7 @@ class ESIClient:
             reported = float(remaining)
             self._tokens = reported
             self._last_refill = time.monotonic()
+            metrics.esi_rate_limit_tokens.set(self._tokens)
 
     async def _wait_for_rate_limit(self) -> None:
         """Wait until we have enough tokens for a request (assumes 2xx cost)."""
@@ -123,6 +126,8 @@ class ESIClient:
             except asyncio.CancelledError:
                 break
 
+            metrics.esi_queue_depth.set(self._queue.qsize())
+
             if future.cancelled():
                 continue
 
@@ -142,6 +147,7 @@ class ESIClient:
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._seq += 1
         await self._queue.put((priority, self._seq, future, killmail_id, killmail_hash))
+        metrics.esi_queue_depth.set(self._queue.qsize())
         return await future
 
     async def _do_fetch_killmail(
@@ -158,13 +164,20 @@ class ESIClient:
         )
 
         for attempt in range(3):
+            request_start = time.monotonic()
             try:
                 async with self._session.get(url) as resp:
                     self._update_rate_limit(resp.headers)
+                    elapsed = time.monotonic() - request_start
 
                     if resp.status == 200:
+                        metrics.esi_requests.labels("success").inc()
+                        metrics.esi_request_seconds.labels("success").observe(elapsed)
                         return await resp.json()
                     elif resp.status in (420, 429):
+                        metrics.esi_requests.labels("rate_limited").inc()
+                        metrics.esi_request_seconds.labels("rate_limited").observe(elapsed)
+                        metrics.esi_rate_limited.inc()
                         retry_after = max(int(resp.headers.get("Retry-After", 60)), 60)
                         logger.warning(
                             f"ESI rate limited ({resp.status}). "
@@ -172,9 +185,12 @@ class ESIClient:
                         )
                         self._tokens = 0
                         self._rate_limited_until = time.monotonic() + retry_after
+                        metrics.esi_backoff_seconds.inc(retry_after)
                         await asyncio.sleep(retry_after)
                         continue
                     elif resp.status in (502, 503, 504):
+                        metrics.esi_requests.labels("server_error").inc()
+                        metrics.esi_request_seconds.labels("server_error").observe(elapsed)
                         logger.warning(
                             f"ESI returned {resp.status} for killmail {killmail_id}. "
                             f"Retrying in 5s (attempt {attempt + 1}/3)."
@@ -182,15 +198,20 @@ class ESIClient:
                         await asyncio.sleep(5)
                         continue
                     elif resp.status == 404:
+                        metrics.esi_requests.labels("not_found").inc()
+                        metrics.esi_request_seconds.labels("not_found").observe(elapsed)
                         logger.warning(f"Killmail {killmail_id} not found (404).")
                         return None
                     else:
+                        metrics.esi_requests.labels("error").inc()
+                        metrics.esi_request_seconds.labels("error").observe(elapsed)
                         text = await resp.text()
                         logger.error(
                             f"ESI returned {resp.status} for killmail {killmail_id}: {text}"
                         )
                         return None
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                metrics.esi_requests.labels("network_error").inc()
                 logger.warning(
                     f"Network error fetching killmail {killmail_id}: {e}. "
                     f"Retrying in 5s (attempt {attempt + 1}/3)."
@@ -198,6 +219,7 @@ class ESIClient:
                 await asyncio.sleep(5)
                 continue
 
+        metrics.esi_requests.labels("exhausted").inc()
         logger.error(f"Failed to fetch killmail {killmail_id} after 3 attempts.")
         return None
 

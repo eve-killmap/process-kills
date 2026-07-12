@@ -14,7 +14,7 @@ class _FakePub:
 
 def test_publish_invalidation_sends_targets():
     fake = _FakePub()
-    asyncio.run(publish_invalidation(fake, ["system_rankings"]))
+    asyncio.run(publish_invalidation(fake, ["system_rankings"]))  # type: ignore[arg-type]
     assert len(fake.calls) == 1
     channel, message = fake.calls[0]
     assert channel == "cache:invalidate"  # default invalidate_channel
@@ -27,4 +27,4 @@ def test_publish_invalidation_swallows_errors():
             raise RuntimeError("redis down")
 
     # Must not raise.
-    asyncio.run(publish_invalidation(_Boom(), ["farthest_kill"]))
+    asyncio.run(publish_invalidation(_Boom(), ["farthest_kill"]))  # type: ignore[arg-type]

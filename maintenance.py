@@ -11,10 +11,12 @@ for aggregate statistics.
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
 import redis.asyncio as aioredis
 
+import metrics
 from config import config
 from db import get_connection
 from stream import publish_invalidation
@@ -60,10 +62,18 @@ async def maintenance_scheduler(
             pass
 
         try:
+            start = time.monotonic()
             await _run_maintenance(live_paused)
+            metrics.maintenance_duration_seconds.labels("weekly").observe(
+                time.monotonic() - start
+            )
+            metrics.maintenance_runs.labels("weekly", "success").inc()
+            metrics.maintenance_last_success_timestamp.labels("weekly").set_to_current_time()
             if redis is not None:
                 await publish_invalidation(redis, ["farthest_kill"])
         except Exception as e:
+            metrics.maintenance_runs.labels("weekly", "failed").inc()
+            metrics.errors.labels("maintenance").inc()
             logger.error(f"Maintenance error: {e}", exc_info=True)
 
     logger.info("Maintenance scheduler stopped.")
@@ -121,12 +131,22 @@ async def mv_refresh_scheduler(
             pass
 
         try:
+            start = time.monotonic()
             await asyncio.get_event_loop().run_in_executor(
                 None, _refresh_materialized_views
             )
+            metrics.maintenance_duration_seconds.labels("mv_refresh").observe(
+                time.monotonic() - start
+            )
+            metrics.maintenance_runs.labels("mv_refresh", "success").inc()
+            metrics.maintenance_last_success_timestamp.labels(
+                "mv_refresh"
+            ).set_to_current_time()
             if redis is not None:
                 await publish_invalidation(redis, ["system_rankings"])
         except Exception as e:
+            metrics.maintenance_runs.labels("mv_refresh", "failed").inc()
+            metrics.errors.labels("mv_refresh").inc()
             logger.error(f"Materialized view refresh error: {e}", exc_info=True)
 
     logger.info("Materialized view refresh scheduler stopped.")

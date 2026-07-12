@@ -9,6 +9,7 @@ from config import ConfigError, config, require_database_url, setup_logging
 from db import get_connection, init_schema
 from esi import ESIClient
 from live import live_listener
+import metrics
 import stream as kill_stream
 from crosscheck import crosscheck_scheduler
 from recheck import no_position_rechecking
@@ -36,6 +37,8 @@ async def main() -> None:
         logger.error(str(e))
         sys.exit(1)
 
+    metrics.start_metrics_server(config)
+
     logger.info("Initializing database schema...")
     with get_connection() as conn:
         init_schema(conn)
@@ -61,6 +64,7 @@ async def main() -> None:
             logger.warning(
                 f"Could not connect to Redis ({e}). Live kills will not be streamed."
             )
+    metrics.redis_connected.set(1 if redis_client is not None else 0)
 
     live_paused = asyncio.Event()
 

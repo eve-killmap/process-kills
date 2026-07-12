@@ -8,6 +8,7 @@ tiered strategy based on kill age. This pass is optional and disabled by default
 import asyncio
 import logging
 
+import metrics
 from config import config
 from esi import ESIClient, Priority, parse_kill
 from db import (
@@ -31,8 +32,13 @@ async def no_position_rechecking(
     while not shutdown_event.is_set():
         try:
             await _recheck_cycle(esi_client, shutdown_event)
+            metrics.recheck_runs.labels("success").inc()
         except Exception as e:
+            metrics.recheck_runs.labels("failed").inc()
+            metrics.errors.labels("recheck").inc()
             logger.error(f"Recheck cycle error: {e}", exc_info=True)
+        finally:
+            metrics.recheck_last_run_timestamp.set_to_current_time()
 
         try:
             await asyncio.wait_for(
@@ -48,6 +54,8 @@ async def no_position_rechecking(
 async def _recheck_cycle(esi_client: ESIClient, shutdown_event: asyncio.Event) -> None:
     with get_connection() as conn:
         candidates = get_recheck_candidates(conn, limit=config.recheck.batch_limit)
+
+    metrics.recheck_candidates.set(len(candidates))
 
     if not candidates:
         logger.debug("No recheck candidates found.")
@@ -74,6 +82,7 @@ async def _recheck_cycle(esi_client: ESIClient, shutdown_event: asyncio.Event) -
             with get_connection() as conn:
                 update_no_position_last_checked(conn, killmail_id)
             still_no_position += 1
+            metrics.recheck_still_no_position.inc()
             continue
 
         kill_data["killmail_hash"] = killmail_hash
@@ -86,12 +95,16 @@ async def _recheck_cycle(esi_client: ESIClient, shutdown_event: asyncio.Event) -
                     date_str = killmail_time.strftime("%Y-%m-%d")
                     increment_processed_kills(conn, date_str)
                     decrement_no_position_kills(conn, date_str)
+                    metrics.kills_processed.labels("recheck", "inserted").inc()
+                    metrics.attackers_inserted.inc(len(parsed["attackers"]))
                 delete_no_position_kill(conn, killmail_id)
                 gained_position += 1
+                metrics.recheck_gained_position.inc()
                 logger.info(f"Recheck: Killmail {killmail_id} now has position data!")
             else:
                 update_no_position_last_checked(conn, killmail_id)
                 still_no_position += 1
+                metrics.recheck_still_no_position.inc()
 
     logger.info(
         f"Recheck cycle complete: {gained_position} gained position, "

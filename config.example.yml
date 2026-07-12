@@ -79,3 +79,11 @@ backfill:
   sleep_between_retries: 2
   killmail_base_url: https://data.everef.net/killmails
   day_path: /{year}/killmails-{date}.tar.bz2
+
+metrics:
+  # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default
+  # (enabling opens a listening socket). Application-level metrics only; Postgres
+  # internals come from a separate DB exporter.
+  enabled: false
+  host: 0.0.0.0
+  port: 9108

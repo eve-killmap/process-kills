@@ -39,6 +39,9 @@ VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 # this never carry a position, so they are never expected to gain one.
 BEGIN_DATE = 20151103
 
+# Service version, surfaced as a Prometheus Info metric.
+SERVICE_VERSION = "1.0.0"
+
 # Generic, PII-free default. Operators must override USER_AGENT in .env with a
 # real contact per CCP's API rules.
 _DEFAULT_USER_AGENT = (
@@ -136,6 +139,13 @@ class BackfillConfig:
 
 
 @dataclass(frozen=True)
+class MetricsConfig:
+    enabled: bool
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
 class Paths:
     base_dir: Path
     data_dir: Path
@@ -154,6 +164,7 @@ class Config:
     streaming: StreamingConfig
     processing: ProcessingConfig
     backfill: BackfillConfig
+    metrics: MetricsConfig
     user_agent: str
     database_url: str | None
     redis_url: str
@@ -243,6 +254,7 @@ def load_config(
     stream_cfg = _section(data, "streaming")
     proc_cfg = _section(data, "processing")
     backfill_cfg = _section(data, "backfill")
+    metrics_cfg = _section(data, "metrics")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -360,6 +372,14 @@ def load_config(
         day_path=backfill_cfg.get("day_path") or _DEFAULT_BACKFILL["day_path"],
     )
 
+    metrics_config = MetricsConfig(
+        enabled=bool(metrics_cfg.get("enabled", False)),
+        host=metrics_cfg.get("host") or "0.0.0.0",
+        port=_as_int(
+            metrics_cfg.get("port", 9108), "metrics.port", minimum=1, maximum=65535
+        ),
+    )
+
     data_dir = Path(env.get("DATA_DIR") or base_dir / "data")
     paths = Paths(base_dir=base_dir, data_dir=data_dir)
 
@@ -375,6 +395,7 @@ def load_config(
         streaming=streaming_config,
         processing=processing_config,
         backfill=backfill_config,
+        metrics=metrics_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,

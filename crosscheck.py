@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 
+import metrics
 from config import BEGIN_DATE, config
 from esi import ESIClient, Priority, parse_kill
 from db import (
@@ -45,8 +47,14 @@ async def crosscheck_scheduler(
             pass
 
         try:
+            start = time.monotonic()
             await run_crosscheck(esi_client, shutdown_event)
+            metrics.crosscheck_duration_seconds.observe(time.monotonic() - start)
+            metrics.crosscheck_runs.labels("success").inc()
+            metrics.crosscheck_last_success_timestamp.set_to_current_time()
         except Exception as e:
+            metrics.crosscheck_runs.labels("failed").inc()
+            metrics.errors.labels("crosscheck").inc()
             logger.error(f"Cross-check error: {e}", exc_info=True)
 
     logger.info("Cross-check scheduler stopped.")
@@ -57,8 +65,10 @@ async def run_crosscheck(esi_client: ESIClient, shutdown_event: asyncio.Event) -
 
     totals = await esi_client.fetch_url(config.sources.zkb_totals_url)
     if totals is None:
+        metrics.zkb_requests.labels("totals", "failed").inc()
         logger.error("Failed to fetch zKillboard totals. Skipping cross-check.")
         return
+    metrics.zkb_requests.labels("totals", "success").inc()
 
     dates_to_check: list[tuple[str, str, int]] = []
     with get_connection() as conn:
@@ -91,6 +101,8 @@ async def run_crosscheck(esi_client: ESIClient, shutdown_event: asyncio.Event) -
 
             dates_to_check.append((date_str, formatted_date, expected_count))
 
+    metrics.crosscheck_dates_pending.set(len(dates_to_check))
+
     if not dates_to_check:
         logger.info("Cross-check complete: all dates reconciled.")
         return
@@ -120,8 +132,10 @@ async def _crosscheck_date(
     url = config.sources.zkb_day_url.format(date=date_raw)
     day_data = await esi_client.fetch_url(url)
     if day_data is None:
+        metrics.zkb_requests.labels("day", "failed").inc()
         logger.error(f"Failed to fetch killmail list for {date_formatted}.")
         return
+    metrics.zkb_requests.labels("day", "success").inc()
 
     all_ids = [int(kid) for kid in day_data.keys()]
     with get_connection() as conn:
@@ -147,6 +161,7 @@ async def _crosscheck_date(
         logger.info(f"Cross-check {date_formatted}: all kills already present.")
         return
 
+    metrics.crosscheck_missing_kills.inc(len(missing))
     logger.info(f"Cross-check {date_formatted}: {len(missing)} missing kills to fetch.")
 
     new_kills = 0
@@ -174,6 +189,8 @@ async def _crosscheck_date(
                 if inserted:
                     increment_processed_kills(conn, date_formatted)
                     new_kills += 1
+                    metrics.kills_processed.labels("crosscheck", "inserted").inc()
+                    metrics.attackers_inserted.inc(len(parsed["attackers"]))
             else:
                 inserted = insert_no_position_kill(
                     conn, killmail_id, killmail_hash, killmail_time
@@ -181,6 +198,7 @@ async def _crosscheck_date(
                 if inserted:
                     increment_no_position_kills(conn, date_formatted)
                     new_no_position += 1
+                    metrics.kills_processed.labels("crosscheck", "no_position").inc()
 
     with get_connection() as conn:
         processed = get_processed_date(conn, date_formatted)

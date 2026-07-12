@@ -190,6 +190,27 @@ def test_invalidate_channel_default_and_override(tmp_path):
     assert cfg.streaming.invalidate_channel == "cache:flush"
 
 
+def test_metrics_defaults_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.metrics.enabled is False
+    assert default_cfg.metrics.host == "0.0.0.0"
+    assert default_cfg.metrics.port == 9108
+
+    yaml_path = write_yaml(
+        tmp_path, "metrics:\n  enabled: true\n  host: 127.0.0.1\n  port: 9200\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.metrics.enabled is True
+    assert cfg.metrics.host == "127.0.0.1"
+    assert cfg.metrics.port == 9200
+
+
+def test_metrics_invalid_port_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "metrics:\n  port: 70000\n")
+    with pytest.raises(ConfigError, match="metrics.port"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
 def test_negative_batch_size_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "processing:\n  batch_size: 0\n")
     with pytest.raises(ConfigError, match="batch_size"):

@@ -27,6 +27,7 @@ client that respects ESI's token budget.
 - Python 3.12+
 - PostgreSQL (the kills database)
 - Redis (optional; only for live streaming to the backend)
+- Prometheus (optional; scrapes the metrics endpoint when `metrics.enabled`)
 
 ## Setup
 
@@ -76,9 +77,24 @@ Sections: `logging` (level, rotation), `sources` (upstream endpoint URLs), `esi`
 (token-bucket rate limit), `live` (poll/retry delays), `recheck` (the optional
 no-position rechecking pass; see below), `crosscheck` (daily run hour),
 `maintenance` (weekly cluster day/hour, materialized-view refresh hours),
-`processing` (batch size), and `backfill` (download settings for the standalone
-script). See [`config.example.yml`](config.example.yml) for the full documented
-set. Invalid or out-of-range values fail fast with a clear `ConfigError`.
+`processing` (batch size), `backfill` (download settings for the standalone
+script), and `metrics` (Prometheus exporter; see below). See
+[`config.example.yml`](config.example.yml) for the full documented set. Invalid
+or out-of-range values fail fast with a clear `ConfigError`.
+
+## Metrics (optional)
+
+With `metrics.enabled: true`, the service exposes a Prometheus scrape endpoint at
+`http://<metrics.host>:<metrics.port>/metrics` (default `0.0.0.0:9108`) for
+Prometheus to pull. It is **disabled by default** (enabling opens a listening
+socket). All metrics are **application-level**: throughput
+(`eve_killmap_kills_processed_total`), freshness (`eve_killmap_killmail_lag_seconds`),
+ESI/zKillboard dependency health, job status (cross-check / recheck / maintenance),
+streaming + cache-invalidation, and an `eve_killmap_errors_total` catch-all,
+plus the client's standard process/GC collectors (Linux only). PostgreSQL
+internals are intentionally left to a separate DB exporter. Metric names are
+prefixed `eve_killmap_`; distinguish services by the Prometheus scrape target's
+`job`/`instance` labels.
 
 ## No-position rechecking (optional)
 

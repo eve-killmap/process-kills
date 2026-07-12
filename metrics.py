@@ -176,19 +176,19 @@ recheck_last_run_timestamp = Gauge(
 
 maintenance_runs = Counter(
     "eve_killmap_maintenance_runs",
-    "Maintenance job runs, by job and result.",
-    ["job", "result"],  # job: mv_refresh|weekly  result: success|failed
+    "Maintenance job runs, by task and result.",
+    ["task", "result"],  # task: mv_refresh|weekly  result: success|failed
 )
 maintenance_duration_seconds = Histogram(
     "eve_killmap_maintenance_duration_seconds",
-    "Duration of a maintenance job.",
-    ["job"],
+    "Duration of a maintenance task.",
+    ["task"],
     buckets=_DURATION_BUCKETS,
 )
 maintenance_last_success_timestamp = Gauge(
     "eve_killmap_maintenance_last_success_timestamp_seconds",
-    "Unix time of the last successful run of a maintenance job.",
-    ["job"],
+    "Unix time of the last successful run of a maintenance task.",
+    ["task"],
 )
 
 

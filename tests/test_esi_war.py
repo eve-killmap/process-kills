@@ -55,3 +55,23 @@ def test_fetch_war_returns_json_via_queue():
 
     result = asyncio.run(run())
     assert result == {"id": 42, "mutual": False}
+
+
+def test_do_fetch_war_records_esi_request_metrics():
+    # War fetches must appear in the shared esi_requests metric (like killmails).
+    from prometheus_client import REGISTRY
+
+    def val(outcome):
+        return (
+            REGISTRY.get_sample_value(
+                "eve_killmap_esi_requests_total", {"outcome": outcome}
+            )
+            or 0.0
+        )
+
+    client = ESIClient(asyncio.Event())
+    client._session = _FakeSession(_FakeResp(200, {"id": 7}))
+    before = val("success")
+    result = asyncio.run(client._do_fetch_war(7))
+    assert result == {"id": 7}
+    assert val("success") == before + 1

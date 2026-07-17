@@ -248,12 +248,19 @@ class ESIClient:
         url = config.sources.esi_war_url.format(war_id=war_id)
 
         for attempt in range(3):
+            request_start = time.monotonic()
             try:
                 async with self._session.get(url) as resp:
                     self._update_rate_limit(resp.headers)
+                    elapsed = time.monotonic() - request_start
                     if resp.status == 200:
+                        metrics.esi_requests.labels("success").inc()
+                        metrics.esi_request_seconds.labels("success").observe(elapsed)
                         return await resp.json()
                     if resp.status in (420, 429):
+                        metrics.esi_requests.labels("rate_limited").inc()
+                        metrics.esi_request_seconds.labels("rate_limited").observe(elapsed)
+                        metrics.esi_rate_limited.inc()
                         retry_after = max(int(resp.headers.get("Retry-After", 60)), 60)
                         logger.warning(
                             f"ESI war rate limited ({resp.status}). Waiting {retry_after}s."
@@ -264,18 +271,26 @@ class ESIClient:
                         await asyncio.sleep(retry_after)
                         continue
                     if resp.status in (502, 503, 504):
+                        metrics.esi_requests.labels("server_error").inc()
+                        metrics.esi_request_seconds.labels("server_error").observe(elapsed)
                         await asyncio.sleep(5)
                         continue
                     if resp.status == 404:
+                        metrics.esi_requests.labels("not_found").inc()
+                        metrics.esi_request_seconds.labels("not_found").observe(elapsed)
                         logger.warning(f"War {war_id} not found (404).")
                         return None
+                    metrics.esi_requests.labels("error").inc()
+                    metrics.esi_request_seconds.labels("error").observe(elapsed)
                     logger.error(f"ESI returned {resp.status} for war {war_id}.")
                     return None
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                metrics.esi_requests.labels("network_error").inc()
                 logger.warning(f"Network error fetching war {war_id}: {e}. Retrying.")
                 await asyncio.sleep(5)
                 continue
 
+        metrics.esi_requests.labels("exhausted").inc()
         logger.error(f"Failed to fetch war {war_id} after 3 attempts.")
         raise RuntimeError(f"war {war_id} fetch exhausted (transient)")
 

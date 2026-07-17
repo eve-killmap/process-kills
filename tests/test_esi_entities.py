@@ -1,0 +1,51 @@
+# tests/test_esi_entities.py
+import asyncio
+
+from esi import ESIClient
+
+
+class _FakeResp:
+    def __init__(self, status, payload):
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self):
+        return self._payload
+
+
+class _FakeSession:
+    """Records POST batches, returns one name row per posted id."""
+
+    def __init__(self):
+        self.batches = []
+
+    def post(self, url, json):
+        self.batches.append(list(json))
+        return _FakeResp(200, [{"id": i, "name": f"name-{i}"} for i in json])
+
+
+def _client_with_session(session):
+    client = ESIClient(asyncio.Event())
+    client._session = session
+    return client
+
+
+def test_resolve_names_empty_is_noop():
+    client = _client_with_session(_FakeSession())
+    assert asyncio.run(client.resolve_names(set())) == {}
+
+
+def test_resolve_names_batches_by_1000():
+    session = _FakeSession()
+    client = _client_with_session(session)
+    ids = set(range(1, 2501))  # 3 batches: 1000, 1000, 500
+    result = asyncio.run(client.resolve_names(ids))
+    assert len(result) == 2500
+    assert result[1] == "name-1"
+    assert sorted(len(b) for b in session.batches) == [500, 1000, 1000]

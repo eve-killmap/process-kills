@@ -249,6 +249,70 @@ class ESIClient:
         logger.error(f"Failed to fetch {url} after 3 attempts.")
         return None
 
+    async def resolve_names(self, ids: set[int]) -> dict[int, str]:
+        """Bulk-resolve character/faction/etc. names. Not rate limited."""
+        if not ids:
+            return {}
+        assert self._session is not None
+        result: dict[int, str] = {}
+        id_list = list(ids)
+        for i in range(0, len(id_list), 1000):
+            batch = id_list[i : i + 1000]
+            try:
+                async with self._session.post(
+                    config.sources.esi_names_url, json=batch
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning(
+                            f"universe/names returned {resp.status} for {len(batch)} ids."
+                        )
+                        continue
+                    data = await resp.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logger.warning(f"Network error resolving names: {e}")
+                continue
+            for item in data:
+                result[item["id"]] = item["name"]
+        return result
+
+    async def _get_named_entity(
+        self, url: str, kind: str, entity_id: int
+    ) -> tuple[str, str] | None:
+        """GET an entity that returns {name, ticker}. None on 404. Not rate limited."""
+        assert self._session is not None
+        try:
+            async with self._session.get(url) as resp:
+                if resp.status == 404:
+                    return None
+                if resp.status != 200:
+                    logger.warning(f"{kind} {entity_id} returned {resp.status}.")
+                    return None
+                data = await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning(f"Network error fetching {kind} {entity_id}: {e}")
+            return None
+        return data["name"], data["ticker"]
+
+    async def get_corporation(self, corporation_id: int) -> tuple[str, str] | None:
+        url = config.sources.esi_corporation_url.format(corporation_id=corporation_id)
+        return await self._get_named_entity(url, "corporation", corporation_id)
+
+    async def get_alliance(self, alliance_id: int) -> tuple[str, str] | None:
+        url = config.sources.esi_alliance_url.format(alliance_id=alliance_id)
+        return await self._get_named_entity(url, "alliance", alliance_id)
+
+    async def get_factions(self) -> list[dict[str, Any]]:
+        assert self._session is not None
+        try:
+            async with self._session.get(config.sources.esi_factions_url) as resp:
+                if resp.status != 200:
+                    logger.warning(f"universe/factions returned {resp.status}.")
+                    return []
+                return await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.warning(f"Network error fetching factions: {e}")
+            return []
+
 
 def parse_kill(kill_data: Mapping[str, Any]) -> ParsedKill | None:
     """Parse ESI killmail data into our internal format. Returns None if no position."""

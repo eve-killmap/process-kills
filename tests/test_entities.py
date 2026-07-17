@@ -72,3 +72,72 @@ def test_group_rows_tombstones_missing_and_none():
     assert rows[10] == ("CorpA", "AAA")
     assert rows[11] == (None, None)
     assert rows[12] == (None, None)
+
+
+import asyncio
+from datetime import datetime, timezone
+
+import db
+import entities
+from entities import EntityIds
+
+
+def test_find_unfresh_subtracts_fresh(monkeypatch):
+    monkeypatch.setattr(db, "get_fresh_character_ids", lambda c, ids, cut: {1})
+    monkeypatch.setattr(db, "get_fresh_corporation_ids", lambda c, ids, cut: set())
+    monkeypatch.setattr(db, "get_fresh_alliance_ids", lambda c, ids, cut: {30})
+    ids = EntityIds(frozenset({1, 2}), frozenset({20}), frozenset({30}))
+    out = entities.find_unfresh(None, ids, datetime.now(timezone.utc), 30)
+    assert out.characters == frozenset({2})
+    assert out.corporations == frozenset({20})
+    assert out.alliances == frozenset()
+
+
+def test_ensure_kill_entities_swallows_errors_and_enqueues(monkeypatch):
+    enqueued = []
+
+    async def boom(*a, **k):
+        raise RuntimeError("esi down")
+
+    monkeypatch.setattr(entities, "find_unfresh", lambda *a, **k: EntityIds(
+        frozenset({1}), frozenset(), frozenset()))
+    monkeypatch.setattr(entities, "resolve_and_store", boom)
+    monkeypatch.setattr(db, "enqueue_entity_backlog", lambda c, kid: enqueued.append(kid))
+
+    parsed = {
+        "killmail_id": 777, "killmail_hash": "h", "killmail_time": "t",
+        "solar_system_id": 1, "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
+        "victim_character_id": 1, "victim_corporation_id": None,
+        "victim_alliance_id": None, "victim_faction_id": None,
+        "victim_damage_taken": 0, "victim_ship_type_id": 1, "war_id": None,
+        "attackers": [],
+    }
+    ok = asyncio.run(entities.ensure_kill_entities(None, object(), parsed))
+    assert ok is False
+    assert enqueued == [777]
+
+
+def test_ensure_kill_entities_noop_when_all_fresh(monkeypatch):
+    # Kill HAS ids, but find_unfresh reports them all fresh -> no ESI, no enqueue.
+    monkeypatch.setattr(entities, "find_unfresh", lambda *a, **k: EntityIds(
+        frozenset(), frozenset(), frozenset()))
+    resolved = []
+
+    async def spy_resolve(*a, **k):
+        resolved.append(True)
+
+    monkeypatch.setattr(entities, "resolve_and_store", spy_resolve)
+    called = []
+    monkeypatch.setattr(db, "enqueue_entity_backlog", lambda c, kid: called.append(kid))
+    parsed = {
+        "killmail_id": 1, "killmail_hash": "h", "killmail_time": "t",
+        "solar_system_id": 1, "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
+        "victim_character_id": 5, "victim_corporation_id": None,
+        "victim_alliance_id": None, "victim_faction_id": None,
+        "victim_damage_taken": 0, "victim_ship_type_id": 1, "war_id": None,
+        "attackers": [],
+    }
+    ok = asyncio.run(entities.ensure_kill_entities(None, object(), parsed))
+    assert ok is True
+    assert resolved == []  # all fresh -> resolve_and_store never called
+    assert called == []

@@ -7,6 +7,7 @@ from typing import Any
 
 import aiohttp
 
+import entities
 import metrics
 import stream
 from config import BEGIN_DATE, config
@@ -18,6 +19,7 @@ from db import (
     set_live_sequence,
     insert_kill,
     insert_no_position_kill,
+    insert_war_stub,
     increment_processed_kills,
     increment_no_position_kills,
 )
@@ -29,6 +31,7 @@ async def live_listener(
     shutdown_event: asyncio.Event,
     live_paused: asyncio.Event | None = None,
     redis: Any = None,
+    esi: Any = None,
 ) -> None:
     logger.info("Live listener started.")
 
@@ -85,7 +88,7 @@ async def live_listener(
                 metrics.live_sequence_fetches.labels("ok").inc()
 
                 process_start = time.monotonic()
-                result, parsed = _process_sequence_kill(data or {}, sequence)
+                result, parsed = await _process_sequence_kill(data or {}, sequence, esi)
                 metrics.kill_processing_seconds.labels("live").observe(
                     time.monotonic() - process_start
                 )
@@ -162,8 +165,8 @@ async def _fetch_sequence(
     return None, None
 
 
-def _process_sequence_kill(
-    data: Mapping[str, Any], sequence: int
+async def _process_sequence_kill(
+    data: Mapping[str, Any], sequence: int, esi: Any
 ) -> tuple[str, ParsedKill | None]:
     killmail_id = data.get("killmail_id")
     killmail_hash = data.get("hash")
@@ -199,6 +202,10 @@ def _process_sequence_kill(
             inserted = insert_kill(conn, parsed)
             if inserted:
                 increment_processed_kills(conn, date_str)
+                if parsed["war_id"] is not None:
+                    insert_war_stub(conn, parsed["war_id"])
+                if esi is not None:
+                    await entities.ensure_kill_entities(conn, esi, parsed)
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))

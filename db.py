@@ -658,6 +658,39 @@ def seed_war_stubs(conn):
     return added
 
 
+def get_distinct_character_ids_after(conn, after: int, limit: int) -> list[int]:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT DISTINCT character_id FROM kill_attackers "
+            "WHERE character_id > %s AND character_id IS NOT NULL "
+            "ORDER BY character_id LIMIT %s",
+            (after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def get_distinct_corporation_ids_after(conn, after: int, limit: int) -> list[int]:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT DISTINCT corporation_id FROM kill_attackers "
+            "WHERE corporation_id > %s AND corporation_id IS NOT NULL "
+            "ORDER BY corporation_id LIMIT %s",
+            (after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def get_distinct_alliance_ids_after(conn, after: int, limit: int) -> list[int]:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT DISTINCT alliance_id FROM kill_attackers "
+            "WHERE alliance_id > %s AND alliance_id IS NOT NULL "
+            "ORDER BY alliance_id LIMIT %s",
+            (after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
 def upsert_factions(conn, rows):
     if not rows:
         return

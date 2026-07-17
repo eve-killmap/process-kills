@@ -188,3 +188,63 @@ GROUP BY solar_system_id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_farthest_kill_per_system_system
     ON mv_farthest_kill_per_system (solar_system_id);
+
+-- Entity reference tables (resolved at ingestion). NULL name = tombstone
+-- (resolved, but ESI had no answer). Row existence stops us retrying forever.
+
+CREATE TABLE IF NOT EXISTS characters (
+    character_id BIGINT PRIMARY KEY,
+    resolved_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    name         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS corporations (
+    corporation_id INTEGER PRIMARY KEY,
+    resolved_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    name           TEXT,
+    ticker         TEXT
+);
+
+CREATE TABLE IF NOT EXISTS alliances (
+    alliance_id INTEGER PRIMARY KEY,
+    resolved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    name        TEXT,
+    ticker      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS factions (
+    faction_id INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS wars (
+    war_id                   BIGINT PRIMARY KEY,
+    declared                 TIMESTAMPTZ,
+    started                  TIMESTAMPTZ,
+    finished                 TIMESTAMPTZ,
+    retracted                TIMESTAMPTZ,
+    mutual                   BOOLEAN,
+    open_for_allies          BOOLEAN,
+    aggressor_corporation_id INTEGER,
+    aggressor_alliance_id    INTEGER,
+    aggressor_ships_killed   INTEGER,
+    aggressor_isk_destroyed  DOUBLE PRECISION,
+    defender_corporation_id  INTEGER,
+    defender_alliance_id     INTEGER,
+    defender_ships_killed    INTEGER,
+    defender_isk_destroyed   DOUBLE PRECISION,
+    ally_corporation_ids     INTEGER[],
+    ally_alliance_ids        INTEGER[],
+    resolved_at              TIMESTAMPTZ,
+    refresh_after            TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Only non-terminal wars are indexed (immutable predicate, no NOW()).
+CREATE INDEX IF NOT EXISTS idx_wars_refresh ON wars (refresh_after)
+    WHERE refresh_after IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS entity_resolve_backlog (
+    killmail_id BIGINT PRIMARY KEY,
+    queued_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    attempts    SMALLINT NOT NULL DEFAULT 0
+);

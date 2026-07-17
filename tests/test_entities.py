@@ -141,3 +141,45 @@ def test_ensure_kill_entities_noop_when_all_fresh(monkeypatch):
     assert ok is True
     assert resolved == []  # all fresh -> resolve_and_store never called
     assert called == []
+
+
+def test_resolve_and_store_counts_each_corp_once(monkeypatch):
+    from prometheus_client import REGISTRY
+
+    def val(outcome):
+        return REGISTRY.get_sample_value(
+            "eve_killmap_entities_resolved_total",
+            {"kind": "corporation", "outcome": outcome},
+        ) or 0.0
+
+    class _Esi:
+        async def resolve_names(self, ids):
+            return {}
+        async def get_corporation(self, cid):
+            if cid == 1:
+                return ("CorpOne", "ONE")   # resolved
+            if cid == 2:
+                return None                  # not_found (404)
+            raise RuntimeError("boom")       # error (cid == 3)
+        async def get_alliance(self, aid):
+            return None
+
+    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: None)
+    monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
+    monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: None)
+
+    before = {o: val(o) for o in ("resolved", "not_found", "error")}
+    unfresh = EntityIds(frozenset(), frozenset({1, 2, 3}), frozenset())
+    asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))
+    after = {o: val(o) for o in ("resolved", "not_found", "error")}
+
+    assert after["resolved"] - before["resolved"] == 1
+    assert after["not_found"] - before["not_found"] == 1
+    assert after["error"] - before["error"] == 1
+
+
+def test_ensure_kill_entities_never_raises_on_malformed_parsed(monkeypatch):
+    monkeypatch.setattr(db, "enqueue_entity_backlog", lambda conn, kid: None)
+    # Missing required keys -> collect_entity_ids would KeyError; must be caught.
+    ok = asyncio.run(entities.ensure_kill_entities(None, object(), {"killmail_id": 5}))
+    assert ok is False

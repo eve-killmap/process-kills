@@ -120,35 +120,37 @@ async def resolve_and_store(
     async def one(kind, fetch, gid):
         async with sem:
             try:
-                return gid, await fetch(gid)
+                return gid, await fetch(gid), False
             except Exception:
                 metrics.entities_resolved.labels(kind, "error").inc()
                 metrics.errors.labels("entities").inc()
-                return gid, None
+                return gid, None, True
 
     if unfresh.corporations:
         start = time.monotonic()
         results = await asyncio.gather(
             *[one("corporation", esi.get_corporation, c) for c in unfresh.corporations]
         )
-        info = {gid: val for gid, val in results}
+        info = {gid: val for gid, val, _err in results}
+        errored = {gid for gid, _val, err in results if err}
         db.upsert_corporations(conn, group_rows(set(unfresh.corporations), info))
         metrics.entity_resolve_seconds.labels("corporation").observe(
             time.monotonic() - start
         )
-        _count_group_outcomes("corporation", info, backfill)
+        _count_group_outcomes("corporation", info, errored, backfill)
 
     if unfresh.alliances:
         start = time.monotonic()
         results = await asyncio.gather(
             *[one("alliance", esi.get_alliance, a) for a in unfresh.alliances]
         )
-        info = {gid: val for gid, val in results}
+        info = {gid: val for gid, val, _err in results}
+        errored = {gid for gid, _val, err in results if err}
         db.upsert_alliances(conn, group_rows(set(unfresh.alliances), info))
         metrics.entity_resolve_seconds.labels("alliance").observe(
             time.monotonic() - start
         )
-        _count_group_outcomes("alliance", info, backfill)
+        _count_group_outcomes("alliance", info, errored, backfill)
 
 
 def _count_name_outcomes(kind, requested, names, backfill):
@@ -159,8 +161,10 @@ def _count_name_outcomes(kind, requested, names, backfill):
             metrics.entities_backfilled.labels(kind).inc()
 
 
-def _count_group_outcomes(kind, info, backfill):
+def _count_group_outcomes(kind, info, errored, backfill):
     for gid, val in info.items():
+        if gid in errored:
+            continue  # already counted as "error"
         if val is None:
             metrics.entities_resolved.labels(kind, "not_found").inc()
         else:
@@ -171,10 +175,10 @@ def _count_group_outcomes(kind, info, backfill):
 
 async def ensure_kill_entities(conn, esi, parsed: ParsedKill) -> bool:
     """Resolve a kill's entities inline. Never raises. False if queued for retry."""
-    ids = collect_entity_ids(parsed)
-    if ids.is_empty:
-        return True
     try:
+        ids = collect_entity_ids(parsed)
+        if ids.is_empty:
+            return True
         unfresh = find_unfresh(
             conn, ids, datetime.now(timezone.utc), config.entities.refresh_after_days
         )
@@ -190,11 +194,11 @@ async def ensure_kill_entities(conn, esi, parsed: ParsedKill) -> bool:
         metrics.errors.labels("entities").inc()
         logger.warning(
             "Entity resolve failed for kill %s (queued for retry): %s",
-            parsed["killmail_id"],
+            parsed.get("killmail_id"),
             e,
         )
         try:
-            db.enqueue_entity_backlog(conn, parsed["killmail_id"])
+            db.enqueue_entity_backlog(conn, parsed.get("killmail_id"))
         except Exception:
             logger.exception("Failed to enqueue entity backlog")
         return False

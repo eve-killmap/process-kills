@@ -3,6 +3,7 @@ import logging
 import time
 from datetime import datetime, timezone, timedelta
 
+import entities
 import metrics
 from config import BEGIN_DATE, config
 from esi import ESIClient, Priority, parse_kill
@@ -12,6 +13,7 @@ from db import (
     update_processed_date,
     insert_kill,
     insert_no_position_kill,
+    insert_war_stub,
     get_existing_killmail_ids,
     increment_processed_kills,
     increment_no_position_kills,
@@ -191,6 +193,9 @@ async def _crosscheck_date(
                     new_kills += 1
                     metrics.kills_processed.labels("crosscheck", "inserted").inc()
                     metrics.attackers_inserted.inc(len(parsed["attackers"]))
+                    if parsed["war_id"] is not None:
+                        insert_war_stub(conn, parsed["war_id"])
+                    await entities.ensure_kill_entities(conn, esi_client, parsed)
             else:
                 inserted = insert_no_position_kill(
                     conn, killmail_id, killmail_hash, killmail_time

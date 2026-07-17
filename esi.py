@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class Priority(IntEnum):
     CROSSCHECK = 0
     RECHECK = 1
+    WAR = 2  # war backfill must never starve crosscheck
 
 
 class ESIClient:
@@ -115,10 +116,10 @@ class ESIClient:
                 self._refill_tokens()
 
     async def _queue_worker(self) -> None:
-        """Process queued ESI requests by priority."""
+        """Process queued ESI requests by priority. Each item carries a thunk."""
         while not self._shutdown.is_set():
             try:
-                _, _, future, killmail_id, killmail_hash = await asyncio.wait_for(
+                _, _, future, thunk = await asyncio.wait_for(
                     self._queue.get(), timeout=1.0
                 )
             except asyncio.TimeoutError:
@@ -132,7 +133,7 @@ class ESIClient:
                 continue
 
             try:
-                result = await self._do_fetch_killmail(killmail_id, killmail_hash)
+                result = await thunk()
                 future.set_result(result)
             except Exception as e:
                 future.set_exception(e)
@@ -146,7 +147,23 @@ class ESIClient:
         """Queue a killmail fetch and wait for the result."""
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._seq += 1
-        await self._queue.put((priority, self._seq, future, killmail_id, killmail_hash))
+
+        async def thunk() -> dict[str, Any] | None:
+            return await self._do_fetch_killmail(killmail_id, killmail_hash)
+
+        await self._queue.put((priority, self._seq, future, thunk))
+        metrics.esi_queue_depth.set(self._queue.qsize())
+        return await future
+
+    async def fetch_war(self, war_id: int) -> dict[str, Any] | None:
+        """Queue a war fetch (lowest priority, rate-limited) and wait."""
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._seq += 1
+
+        async def thunk() -> dict[str, Any] | None:
+            return await self._do_fetch_war(war_id)
+
+        await self._queue.put((Priority.WAR, self._seq, future, thunk))
         metrics.esi_queue_depth.set(self._queue.qsize())
         return await future
 
@@ -221,6 +238,45 @@ class ESIClient:
 
         metrics.esi_requests.labels("exhausted").inc()
         logger.error(f"Failed to fetch killmail {killmail_id} after 3 attempts.")
+        return None
+
+    async def _do_fetch_war(self, war_id: int) -> dict[str, Any] | None:
+        """Fetch a war from ESI, respecting rate limits. None on 404/failure."""
+        await self._wait_for_rate_limit()
+        assert self._session is not None
+
+        url = config.sources.esi_war_url.format(war_id=war_id)
+
+        for attempt in range(3):
+            try:
+                async with self._session.get(url) as resp:
+                    self._update_rate_limit(resp.headers)
+                    if resp.status == 200:
+                        return await resp.json()
+                    if resp.status in (420, 429):
+                        retry_after = max(int(resp.headers.get("Retry-After", 60)), 60)
+                        logger.warning(
+                            f"ESI war rate limited ({resp.status}). Waiting {retry_after}s."
+                        )
+                        self._tokens = 0
+                        self._rate_limited_until = time.monotonic() + retry_after
+                        metrics.esi_backoff_seconds.inc(retry_after)
+                        await asyncio.sleep(retry_after)
+                        continue
+                    if resp.status in (502, 503, 504):
+                        await asyncio.sleep(5)
+                        continue
+                    if resp.status == 404:
+                        logger.warning(f"War {war_id} not found (404).")
+                        return None
+                    logger.error(f"ESI returned {resp.status} for war {war_id}.")
+                    return None
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logger.warning(f"Network error fetching war {war_id}: {e}. Retrying.")
+                await asyncio.sleep(5)
+                continue
+
+        logger.error(f"Failed to fetch war {war_id} after 3 attempts.")
         return None
 
     async def fetch_url(self, url: str, timeout: int = 120) -> Any | None:

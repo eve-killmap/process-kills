@@ -306,9 +306,11 @@ class ESIClient:
         return None
 
     async def resolve_names(self, ids: set[int]) -> tuple[dict[int, str], set[int]]:
-        """Bulk-resolve names. Returns (resolved, failed): `failed` ids hit a
-        transient/batch error and must be RETRIED later, not tombstoned. Not
-        rate limited."""
+        """Bulk-resolve names. Returns (resolved, failed): `failed` holds ids from a
+        WHOLE batch that failed transiently (non-200 / network) and must be retried,
+        not tombstoned. An id simply absent from a 200 response is the bulk
+        404-equivalent -- it is left out of both dicts so the caller tombstones it.
+        Not rate limited."""
         if not ids:
             return {}, set()
         assert self._session is not None
@@ -332,11 +334,8 @@ class ESIClient:
                 logger.warning(f"Network error resolving names: {e}")
                 failed.update(batch)
                 continue
-            returned = {item["id"] for item in data}
             for item in data:
                 result[item["id"]] = item["name"]
-            # Requested in a 200 batch but not returned -> retry, never tombstone.
-            failed.update(set(batch) - returned)
         return result, failed
 
     async def _get_named_entity(

@@ -63,6 +63,19 @@ def test_resolve_names_batches_by_1000():
     assert sorted(len(b) for b in session.batches) == [500, 1000, 1000]
 
 
+def test_resolve_names_absent_id_from_200_is_not_failed():
+    # A 200 that omits an id (the bulk 404-equivalent) must NOT mark it failed;
+    # it should fall through to a tombstone, not retry forever.
+    class _PartialSession:
+        def post(self, url, json):
+            return _FakeResp(200, [{"id": i, "name": f"name-{i}"} for i in json[:-1]])
+
+    client = _client_with_session(_PartialSession())
+    resolved, failed = asyncio.run(client.resolve_names({1, 2, 3}))
+    assert len(resolved) == 2      # one id omitted from the 200
+    assert failed == set()         # omitted id is NOT failed (tombstones instead)
+
+
 def test_get_corporation_success_returns_name_and_ticker():
     resp = _FakeResp(200, {"name": "Test Corp", "ticker": "TEST"})
     client = _client_with_session(_FakeGetSession(resp))

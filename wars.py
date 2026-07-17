@@ -12,10 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 import db
@@ -83,16 +81,6 @@ def war_outcome(refresh_after) -> str:
     return "finished" if refresh_after is None else "active"
 
 
-def _expires_from_headers(headers) -> datetime | None:
-    raw = headers.get("Expires") if headers else None
-    if not raw:
-        return None
-    try:
-        return parsedate_to_datetime(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 async def war_scheduler(esi, shutdown_event) -> None:
     if not config.wars.enabled:
         logger.info("War scheduler disabled (wars.enabled=false).")
@@ -123,7 +111,6 @@ async def war_scheduler(esi, shutdown_event) -> None:
 
 
 async def _refresh_one_war(esi, war_id: int) -> None:
-    start = time.monotonic()
     data = await esi.fetch_war(war_id)
     if data is None:
         # 404 / unresolvable: mark terminal so we stop re-queuing it.

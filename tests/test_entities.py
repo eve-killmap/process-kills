@@ -50,6 +50,7 @@ def test_npc_victim_has_no_character_id():
     ids = collect_entity_ids(kill)
     assert ids.characters == frozenset()
     assert ids.corporations == frozenset()
+    assert ids.alliances == frozenset()
 
 
 def test_is_empty():

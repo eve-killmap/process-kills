@@ -55,3 +55,24 @@ def collect_entity_ids(parsed: ParsedKill) -> EntityIds:
     return EntityIds(
         frozenset(characters), frozenset(corporations), frozenset(alliances)
     )
+
+
+def character_rows(
+    requested: set[int], names: dict[int, str]
+) -> list[tuple[int, str | None]]:
+    """One row per requested id; None name = tombstone (ESI had no answer)."""
+    return [(cid, names.get(cid)) for cid in requested]
+
+
+def group_rows(
+    requested: set[int], info: dict[int, tuple[str, str] | None]
+) -> list[tuple[int, str | None, str | None]]:
+    """One (id, name, ticker) row per requested id; (None, None) if unresolved."""
+    rows: list[tuple[int, str | None, str | None]] = []
+    for gid in requested:
+        entry = info.get(gid)
+        if entry is None:
+            rows.append((gid, None, None))
+        else:
+            rows.append((gid, entry[0], entry[1]))
+    return rows

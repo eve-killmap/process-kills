@@ -412,3 +412,83 @@ def set_live_sequence(conn: connection, sequence: int) -> None:
         cursor.execute("DELETE FROM live_state")
         cursor.execute("INSERT INTO live_state (sequence) VALUES (%s)", (sequence,))
     conn.commit()
+
+
+def _fresh_ids(
+    conn: connection, table: str, id_col: str, ids: list[int], cutoff: Any
+) -> set[int]:
+    # table/id_col are internal constants (never user input).
+    if not ids:
+        return set()
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            f"SELECT {id_col} FROM {table} "
+            f"WHERE {id_col} = ANY(%s) AND resolved_at > %s",
+            (ids, cutoff),
+        )
+        return {row[0] for row in cursor.fetchall()}
+
+
+def get_fresh_character_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "characters", "character_id", ids, cutoff)
+
+
+def get_fresh_corporation_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "corporations", "corporation_id", ids, cutoff)
+
+
+def get_fresh_alliance_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "alliances", "alliance_id", ids, cutoff)
+
+
+def upsert_characters(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO characters (character_id, name) VALUES %s
+            ON CONFLICT (character_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, characters.name),
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def upsert_corporations(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO corporations (corporation_id, name, ticker) VALUES %s
+            ON CONFLICT (corporation_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, corporations.name),
+                ticker = COALESCE(EXCLUDED.ticker, corporations.ticker),
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def upsert_alliances(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO alliances (alliance_id, name, ticker) VALUES %s
+            ON CONFLICT (alliance_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, alliances.name),
+                ticker = COALESCE(EXCLUDED.ticker, alliances.ticker),
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()

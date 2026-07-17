@@ -49,16 +49,17 @@ def _client_with_session(session):
 
 def test_resolve_names_empty_is_noop():
     client = _client_with_session(_FakeSession())
-    assert asyncio.run(client.resolve_names(set())) == {}
+    assert asyncio.run(client.resolve_names(set())) == ({}, set())
 
 
 def test_resolve_names_batches_by_1000():
     session = _FakeSession()
     client = _client_with_session(session)
     ids = set(range(1, 2501))  # 3 batches: 1000, 1000, 500
-    result = asyncio.run(client.resolve_names(ids))
-    assert len(result) == 2500
-    assert result[1] == "name-1"
+    resolved, failed = asyncio.run(client.resolve_names(ids))
+    assert len(resolved) == 2500
+    assert failed == set()
+    assert resolved[1] == "name-1"
     assert sorted(len(b) for b in session.batches) == [500, 1000, 1000]
 
 

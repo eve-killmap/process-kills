@@ -108,12 +108,13 @@ async def resolve_and_store(
     """Resolve unfresh ids via ESI and upsert them (tombstoning failures)."""
     if unfresh.characters:
         start = time.monotonic()
-        names = await esi.resolve_names(set(unfresh.characters))
-        db.upsert_characters(conn, character_rows(set(unfresh.characters), names))
+        names, failed = await esi.resolve_names(set(unfresh.characters))
+        resolved_ids = set(unfresh.characters) - failed
+        db.upsert_characters(conn, character_rows(resolved_ids, names))
         metrics.entity_resolve_seconds.labels("character").observe(
             time.monotonic() - start
         )
-        _count_name_outcomes("character", unfresh.characters, names, backfill)
+        _count_name_outcomes("character", resolved_ids, names, failed, backfill)
 
     sem = asyncio.Semaphore(max_concurrency)
 
@@ -131,40 +132,42 @@ async def resolve_and_store(
         results = await asyncio.gather(
             *[one("corporation", esi.get_corporation, c) for c in unfresh.corporations]
         )
-        info = {gid: val for gid, val, _err in results}
         errored = {gid for gid, _val, err in results if err}
-        db.upsert_corporations(conn, group_rows(set(unfresh.corporations), info))
+        info = {gid: val for gid, val, err in results if not err}
+        resolved_ids = set(unfresh.corporations) - errored
+        db.upsert_corporations(conn, group_rows(resolved_ids, info))
         metrics.entity_resolve_seconds.labels("corporation").observe(
             time.monotonic() - start
         )
-        _count_group_outcomes("corporation", info, errored, backfill)
+        _count_group_outcomes("corporation", info, backfill)
 
     if unfresh.alliances:
         start = time.monotonic()
         results = await asyncio.gather(
             *[one("alliance", esi.get_alliance, a) for a in unfresh.alliances]
         )
-        info = {gid: val for gid, val, _err in results}
         errored = {gid for gid, _val, err in results if err}
-        db.upsert_alliances(conn, group_rows(set(unfresh.alliances), info))
+        info = {gid: val for gid, val, err in results if not err}
+        resolved_ids = set(unfresh.alliances) - errored
+        db.upsert_alliances(conn, group_rows(resolved_ids, info))
         metrics.entity_resolve_seconds.labels("alliance").observe(
             time.monotonic() - start
         )
-        _count_group_outcomes("alliance", info, errored, backfill)
+        _count_group_outcomes("alliance", info, backfill)
 
 
-def _count_name_outcomes(kind, requested, names, backfill):
-    for cid in requested:
+def _count_name_outcomes(kind, resolved_ids, names, failed, backfill):
+    for cid in resolved_ids:
         outcome = "resolved" if cid in names else "not_found"
         metrics.entities_resolved.labels(kind, outcome).inc()
         if backfill and outcome == "resolved":
             metrics.entities_backfilled.labels(kind).inc()
+    for _cid in failed:
+        metrics.entities_resolved.labels(kind, "error").inc()
 
 
-def _count_group_outcomes(kind, info, errored, backfill):
+def _count_group_outcomes(kind, info, backfill):
     for gid, val in info.items():
-        if gid in errored:
-            continue  # already counted as "error"
         if val is None:
             metrics.entities_resolved.labels(kind, "not_found").inc()
         else:

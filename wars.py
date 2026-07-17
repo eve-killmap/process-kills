@@ -81,6 +81,9 @@ def war_outcome(refresh_after) -> str:
     return "finished" if refresh_after is None else "active"
 
 
+WAR_RETRY_BACKOFF = timedelta(minutes=10)
+
+
 async def war_scheduler(esi, shutdown_event) -> None:
     if not config.wars.enabled:
         logger.info("War scheduler disabled (wars.enabled=false).")
@@ -111,9 +114,19 @@ async def war_scheduler(esi, shutdown_event) -> None:
 
 
 async def _refresh_one_war(esi, war_id: int) -> None:
-    data = await esi.fetch_war(war_id)
+    try:
+        data = await esi.fetch_war(war_id)
+    except Exception as e:
+        # Transient ESI failure: leave the war due (short backoff) so it retries.
+        logger.warning("War %s fetch failed transiently, will retry: %s", war_id, e)
+        with db.get_connection() as conn:
+            db.set_war_refresh_after(
+                conn, war_id, datetime.now(timezone.utc) + WAR_RETRY_BACKOFF
+            )
+        metrics.wars_resolved.labels("error").inc()
+        return
     if data is None:
-        # 404 / unresolvable: mark terminal so we stop re-queuing it.
+        # Genuine 404: mark terminal so we stop re-queuing it.
         with db.get_connection() as conn:
             db.upsert_war(conn, parse_war({"id": war_id}), None, None)
         metrics.wars_resolved.labels("not_found").inc()

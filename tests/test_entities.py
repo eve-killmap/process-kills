@@ -164,7 +164,8 @@ def test_resolve_and_store_counts_each_corp_once(monkeypatch):
         async def get_alliance(self, aid):
             return None
 
-    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: None)
+    upserted = []
+    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: upserted.extend(rows))
     monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
     monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: None)
 
@@ -176,6 +177,35 @@ def test_resolve_and_store_counts_each_corp_once(monkeypatch):
     assert after["resolved"] - before["resolved"] == 1
     assert after["not_found"] - before["not_found"] == 1
     assert after["error"] - before["error"] == 1
+
+    upserted_ids = {r[0] for r in upserted}
+    assert 3 not in upserted_ids   # errored corp NOT tombstoned (will retry)
+    assert upserted_ids == {1, 2}  # only the resolved + genuine-404 ids written
+
+
+def test_resolve_and_store_does_not_tombstone_failed_characters(monkeypatch):
+    upserted = []
+
+    class _Esi:
+        async def resolve_names(self, ids):
+            return {1: "Alice"}, {2}   # 1 resolved, 2 failed transiently
+
+        async def get_corporation(self, cid):
+            return None
+
+        async def get_alliance(self, aid):
+            return None
+
+    monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: upserted.extend(rows))
+    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: None)
+    monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
+
+    unfresh = EntityIds(frozenset({1, 2}), frozenset(), frozenset())
+    asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))
+
+    upserted_ids = {r[0] for r in upserted}
+    assert 1 in upserted_ids       # resolved character written
+    assert 2 not in upserted_ids   # failed character NOT tombstoned (will retry)
 
 
 def test_ensure_kill_entities_never_raises_on_malformed_parsed(monkeypatch):

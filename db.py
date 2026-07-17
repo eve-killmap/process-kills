@@ -645,6 +645,15 @@ def upsert_war(conn, row, resolved_at, refresh_after):
     conn.commit()
 
 
+def set_war_refresh_after(conn, war_id, refresh_after):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE wars SET refresh_after = %s WHERE war_id = %s",
+            (refresh_after, war_id),
+        )
+    conn.commit()
+
+
 def seed_war_stubs(conn):
     """Insert a stub row for every distinct war_id in kills. Returns rows added."""
     with get_cursor(conn) as cursor:
@@ -658,35 +667,47 @@ def seed_war_stubs(conn):
     return added
 
 
-def get_distinct_character_ids_after(conn, after: int, limit: int) -> list[int]:
+def get_distinct_character_ids_after(conn, after, limit):
     with get_cursor(conn) as cursor:
         cursor.execute(
-            "SELECT DISTINCT character_id FROM kill_attackers "
-            "WHERE character_id > %s AND character_id IS NOT NULL "
-            "ORDER BY character_id LIMIT %s",
-            (after, limit),
+            "SELECT id FROM ("
+            "  SELECT DISTINCT character_id AS id FROM kill_attackers "
+            "    WHERE character_id > %s AND character_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_character_id AS id FROM kills "
+            "    WHERE victim_character_id > %s AND victim_character_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
         )
         return [row[0] for row in cursor.fetchall()]
 
 
-def get_distinct_corporation_ids_after(conn, after: int, limit: int) -> list[int]:
+def get_distinct_corporation_ids_after(conn, after, limit):
     with get_cursor(conn) as cursor:
         cursor.execute(
-            "SELECT DISTINCT corporation_id FROM kill_attackers "
-            "WHERE corporation_id > %s AND corporation_id IS NOT NULL "
-            "ORDER BY corporation_id LIMIT %s",
-            (after, limit),
+            "SELECT id FROM ("
+            "  SELECT DISTINCT corporation_id AS id FROM kill_attackers "
+            "    WHERE corporation_id > %s AND corporation_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_corporation_id AS id FROM kills "
+            "    WHERE victim_corporation_id > %s AND victim_corporation_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
         )
         return [row[0] for row in cursor.fetchall()]
 
 
-def get_distinct_alliance_ids_after(conn, after: int, limit: int) -> list[int]:
+def get_distinct_alliance_ids_after(conn, after, limit):
     with get_cursor(conn) as cursor:
         cursor.execute(
-            "SELECT DISTINCT alliance_id FROM kill_attackers "
-            "WHERE alliance_id > %s AND alliance_id IS NOT NULL "
-            "ORDER BY alliance_id LIMIT %s",
-            (after, limit),
+            "SELECT id FROM ("
+            "  SELECT DISTINCT alliance_id AS id FROM kill_attackers "
+            "    WHERE alliance_id > %s AND alliance_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_alliance_id AS id FROM kills "
+            "    WHERE victim_alliance_id > %s AND victim_alliance_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
         )
         return [row[0] for row in cursor.fetchall()]
 

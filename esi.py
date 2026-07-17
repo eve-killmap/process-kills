@@ -277,7 +277,7 @@ class ESIClient:
                 continue
 
         logger.error(f"Failed to fetch war {war_id} after 3 attempts.")
-        return None
+        raise RuntimeError(f"war {war_id} fetch exhausted (transient)")
 
     async def fetch_url(self, url: str, timeout: int = 120) -> Any | None:
         """Fetch a non-ESI URL (zKillboard, etc). No rate limiting applied."""
@@ -305,12 +305,15 @@ class ESIClient:
         logger.error(f"Failed to fetch {url} after 3 attempts.")
         return None
 
-    async def resolve_names(self, ids: set[int]) -> dict[int, str]:
-        """Bulk-resolve character/faction/etc. names. Not rate limited."""
+    async def resolve_names(self, ids: set[int]) -> tuple[dict[int, str], set[int]]:
+        """Bulk-resolve names. Returns (resolved, failed): `failed` ids hit a
+        transient/batch error and must be RETRIED later, not tombstoned. Not
+        rate limited."""
         if not ids:
-            return {}
+            return {}, set()
         assert self._session is not None
         result: dict[int, str] = {}
+        failed: set[int] = set()
         id_list = list(ids)
         for i in range(0, len(id_list), 1000):
             batch = id_list[i : i + 1000]
@@ -322,31 +325,36 @@ class ESIClient:
                         logger.warning(
                             f"universe/names returned {resp.status} for {len(batch)} ids."
                         )
+                        failed.update(batch)
                         continue
                     data = await resp.json()
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.warning(f"Network error resolving names: {e}")
+                failed.update(batch)
                 continue
+            returned = {item["id"] for item in data}
             for item in data:
                 result[item["id"]] = item["name"]
-        return result
+            # Requested in a 200 batch but not returned -> retry, never tombstone.
+            failed.update(set(batch) - returned)
+        return result, failed
 
     async def _get_named_entity(
         self, url: str, kind: str, entity_id: int
     ) -> tuple[str, str] | None:
-        """GET an entity that returns {name, ticker}. None on 404. Not rate limited."""
+        """GET an entity returning {name, ticker}. None ONLY on 404 (genuine
+        absent -> tombstone). Raises on transient failure (5xx / network / other
+        non-200) so the caller retries instead of tombstoning. Not rate limited."""
         assert self._session is not None
-        try:
-            async with self._session.get(url) as resp:
-                if resp.status == 404:
-                    return None
-                if resp.status != 200:
-                    logger.warning(f"{kind} {entity_id} returned {resp.status}.")
-                    return None
-                data = await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            logger.warning(f"Network error fetching {kind} {entity_id}: {e}")
-            return None
+        async with self._session.get(url) as resp:
+            if resp.status == 404:
+                return None
+            if resp.status != 200:
+                text = await resp.text()
+                raise RuntimeError(
+                    f"{kind} {entity_id} returned {resp.status}: {text[:200]}"
+                )
+            data = await resp.json()
         return data["name"], data["ticker"]
 
     async def get_corporation(self, corporation_id: int) -> tuple[str, str] | None:

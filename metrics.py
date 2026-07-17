@@ -219,7 +219,7 @@ redis_connected = Gauge(
 errors = Counter(
     "eve_killmap_errors",
     "Unhandled errors caught in a scheduler/loop, by component.",
-    ["component"],  # live|crosscheck|recheck|maintenance|mv_refresh
+    ["component"],  # live|crosscheck|recheck|maintenance|mv_refresh|entities|wars|factions|entity_backlog
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",
@@ -228,6 +228,47 @@ service_start_timestamp = Gauge(
 service_info = Info(
     "eve_killmap_service",
     "Static service information (version).",
+)
+
+
+# Entity / War Enrichment
+
+entities_resolved = Counter(
+    "eve_killmap_entities_resolved",
+    "Entities resolved via ESI, by kind and outcome.",
+    ["kind", "outcome"],  # kind: character|corporation|alliance  outcome: resolved|not_found|error
+)
+entity_resolve_seconds = Histogram(
+    "eve_killmap_entity_resolve_seconds",
+    "Time to resolve+store a kind of entity for one kill (inline path cost).",
+    ["kind"],
+)
+entity_resolve_timeouts = Counter(
+    "eve_killmap_entity_resolve_timeouts",
+    "Inline entity resolutions that exceeded resolve_timeout and were queued.",
+)
+entity_backlog_depth = Gauge(
+    "eve_killmap_entity_backlog_depth",
+    "Rows in entity_resolve_backlog (should be ~0 in steady state).",
+)
+entities_backfilled = Counter(
+    "eve_killmap_entities_backfilled",
+    "Entities resolved by the historical backfill, by kind.",
+    ["kind"],  # character|corporation|alliance
+)
+wars_resolved = Counter(
+    "eve_killmap_wars_resolved",
+    "War refreshes, by outcome.",
+    ["outcome"],  # active|finished|not_found|error
+)
+wars_pending = Gauge(
+    "eve_killmap_wars_pending",
+    "Wars due for refresh (refresh_after <= now); drain progress.",
+)
+factions_refreshed = Counter(
+    "eve_killmap_factions_refreshed",
+    "Faction table refresh runs, by result.",
+    ["result"],  # success|failed
 )
 
 

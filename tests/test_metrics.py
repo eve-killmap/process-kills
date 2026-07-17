@@ -40,3 +40,20 @@ def test_start_metrics_server_disabled_is_noop(tmp_path):
     assert cfg.metrics.enabled is False
     metrics.start_metrics_server(cfg)
     assert metrics._started is False
+
+
+def test_entities_resolved_counter_is_labeled():
+    labels = {"kind": "character", "outcome": "resolved"}
+    before = _val("eve_killmap_entities_resolved_total", labels) or 0.0
+    metrics.entities_resolved.labels("character", "resolved").inc()
+    assert _val("eve_killmap_entities_resolved_total", labels) == before + 1
+
+
+def test_wars_pending_gauge_can_be_set():
+    metrics.wars_pending.set(42)
+    assert _val("eve_killmap_wars_pending") == 42
+
+
+def test_entity_backlog_depth_gauge_can_be_set():
+    metrics.entity_backlog_depth.set(3)
+    assert _val("eve_killmap_entity_backlog_depth") == 3

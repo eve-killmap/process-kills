@@ -258,3 +258,42 @@ def test_esi_entity_source_urls_have_defaults(tmp_path):
     assert cfg.sources.esi_alliance_url == "https://esi.evetech.net/alliances/{alliance_id}/"
     assert cfg.sources.esi_factions_url == "https://esi.evetech.net/universe/factions/"
     assert cfg.sources.esi_war_url == "https://esi.evetech.net/wars/{war_id}/"
+
+
+def test_enrichment_sections_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.entities.refresh_after_days == 30
+    assert cfg.entities.resolve_timeout == pytest.approx(10.0)
+    assert cfg.entities.max_concurrency == 10
+    assert cfg.entities.backlog_interval == 60
+    assert cfg.wars.enabled is True
+    assert cfg.wars.interval == 60
+    assert cfg.wars.batch_size == 100
+    assert cfg.factions.refresh_days == 7
+
+
+def test_enrichment_sections_override(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path,
+        """
+        entities:
+          refresh_after_days: 90
+          max_concurrency: 4
+        wars:
+          enabled: false
+        factions:
+          refresh_days: 14
+        """,
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.entities.refresh_after_days == 90
+    assert cfg.entities.max_concurrency == 4
+    assert cfg.entities.resolve_timeout == pytest.approx(10.0)  # untouched default
+    assert cfg.wars.enabled is False
+    assert cfg.factions.refresh_days == 14
+
+
+def test_entities_invalid_concurrency_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "entities:\n  max_concurrency: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

@@ -156,6 +156,26 @@ class MetricsConfig:
 
 
 @dataclass(frozen=True)
+class EntitiesConfig:
+    refresh_after_days: int
+    resolve_timeout: float
+    max_concurrency: int
+    backlog_interval: int
+
+
+@dataclass(frozen=True)
+class WarsConfig:
+    enabled: bool
+    interval: int
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class FactionsConfig:
+    refresh_days: int
+
+
+@dataclass(frozen=True)
 class Paths:
     base_dir: Path
     data_dir: Path
@@ -175,6 +195,9 @@ class Config:
     processing: ProcessingConfig
     backfill: BackfillConfig
     metrics: MetricsConfig
+    entities: EntitiesConfig
+    wars: WarsConfig
+    factions: FactionsConfig
     user_agent: str
     database_url: str | None
     redis_url: str
@@ -265,6 +288,9 @@ def load_config(
     proc_cfg = _section(data, "processing")
     backfill_cfg = _section(data, "backfill")
     metrics_cfg = _section(data, "metrics")
+    entities_cfg = _section(data, "entities")
+    wars_cfg = _section(data, "wars")
+    factions_cfg = _section(data, "factions")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -398,6 +424,41 @@ def load_config(
         ),
     )
 
+    entities_config = EntitiesConfig(
+        refresh_after_days=_as_int(
+            entities_cfg.get("refresh_after_days", 30),
+            "entities.refresh_after_days",
+            minimum=1,
+        ),
+        resolve_timeout=_as_positive_float(
+            entities_cfg.get("resolve_timeout", 10.0), "entities.resolve_timeout"
+        ),
+        max_concurrency=_as_int(
+            entities_cfg.get("max_concurrency", 10),
+            "entities.max_concurrency",
+            minimum=1,
+        ),
+        backlog_interval=_as_int(
+            entities_cfg.get("backlog_interval", 60),
+            "entities.backlog_interval",
+            minimum=1,
+        ),
+    )
+
+    wars_config = WarsConfig(
+        enabled=bool(wars_cfg.get("enabled", True)),
+        interval=_as_int(wars_cfg.get("interval", 60), "wars.interval", minimum=1),
+        batch_size=_as_int(
+            wars_cfg.get("batch_size", 100), "wars.batch_size", minimum=1
+        ),
+    )
+
+    factions_config = FactionsConfig(
+        refresh_days=_as_int(
+            factions_cfg.get("refresh_days", 7), "factions.refresh_days", minimum=1
+        ),
+    )
+
     data_dir = Path(env.get("DATA_DIR") or base_dir / "data")
     paths = Paths(base_dir=base_dir, data_dir=data_dir)
 
@@ -414,6 +475,9 @@ def load_config(
         processing=processing_config,
         backfill=backfill_config,
         metrics=metrics_config,
+        entities=entities_config,
+        wars=wars_config,
+        factions=factions_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,

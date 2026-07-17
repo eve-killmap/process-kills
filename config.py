@@ -56,6 +56,11 @@ _DEFAULT_SOURCES = {
     "esi_killmail_url": "https://esi.evetech.net/killmails/{killmail_id}/{killmail_hash}/",
     "zkb_totals_url": "https://r2z2.zkillboard.com/history/totals.json",
     "zkb_day_url": "https://r2z2.zkillboard.com/history/{date}.json",
+    "esi_names_url": "https://esi.evetech.net/universe/names/",
+    "esi_corporation_url": "https://esi.evetech.net/corporations/{corporation_id}/",
+    "esi_alliance_url": "https://esi.evetech.net/alliances/{alliance_id}/",
+    "esi_factions_url": "https://esi.evetech.net/universe/factions/",
+    "esi_war_url": "https://esi.evetech.net/wars/{war_id}/",
 }
 
 _DEFAULT_BACKFILL = {
@@ -83,6 +88,11 @@ class SourcesConfig:
     esi_killmail_url: str
     zkb_totals_url: str
     zkb_day_url: str
+    esi_names_url: str
+    esi_corporation_url: str
+    esi_alliance_url: str
+    esi_factions_url: str
+    esi_war_url: str
 
 
 @dataclass(frozen=True)
@@ -287,6 +297,14 @@ def load_config(
         zkb_totals_url=src_cfg.get("zkb_totals_url")
         or _DEFAULT_SOURCES["zkb_totals_url"],
         zkb_day_url=src_cfg.get("zkb_day_url") or _DEFAULT_SOURCES["zkb_day_url"],
+        esi_names_url=src_cfg.get("esi_names_url") or _DEFAULT_SOURCES["esi_names_url"],
+        esi_corporation_url=src_cfg.get("esi_corporation_url")
+        or _DEFAULT_SOURCES["esi_corporation_url"],
+        esi_alliance_url=src_cfg.get("esi_alliance_url")
+        or _DEFAULT_SOURCES["esi_alliance_url"],
+        esi_factions_url=src_cfg.get("esi_factions_url")
+        or _DEFAULT_SOURCES["esi_factions_url"],
+        esi_war_url=src_cfg.get("esi_war_url") or _DEFAULT_SOURCES["esi_war_url"],
     )
 
     esi_config = EsiConfig(

@@ -249,3 +249,12 @@ def test_setup_logging_applies_level(tmp_path):
             handler.close()
         root.handlers[:] = original_handlers
         root.setLevel(original_level)
+
+
+def test_esi_entity_source_urls_have_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.sources.esi_names_url == "https://esi.evetech.net/universe/names/"
+    assert cfg.sources.esi_corporation_url == "https://esi.evetech.net/corporations/{corporation_id}/"
+    assert cfg.sources.esi_alliance_url == "https://esi.evetech.net/alliances/{alliance_id}/"
+    assert cfg.sources.esi_factions_url == "https://esi.evetech.net/universe/factions/"
+    assert cfg.sources.esi_war_url == "https://esi.evetech.net/wars/{war_id}/"

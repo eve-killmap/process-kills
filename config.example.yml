@@ -87,3 +87,20 @@ metrics:
   enabled: false
   host: 0.0.0.0
   port: 9108
+
+# Entity enrichment: resolve killmail IDs to names/tickers at ingestion.
+entities:
+  refresh_after_days: 30   # re-resolve an entity only if last seen longer ago than this
+  resolve_timeout: 10.0    # inline resolve budget (s); on timeout, publish anyway + queue
+  max_concurrency: 10      # concurrent corp/alliance fetches per kill
+  backlog_interval: 60     # seconds between backlog-drain cycles
+
+# War info refresh (rate-limited endpoint; decoupled from ingestion).
+wars:
+  enabled: true
+  interval: 60             # seconds between refresh cycles
+  batch_size: 100          # wars per cycle (the ESI token bucket is the real ceiling)
+
+# Faction reference data (small, near-static; fetched whole).
+factions:
+  refresh_days: 7

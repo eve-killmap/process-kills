@@ -104,6 +104,35 @@ re-fetches those killmails from ESI in case they have since gained a position,
 promoting any that do into the main `kills` table. This pass is **disabled by
 default**; no-position kills are recorded either way.
 
+## Entity enrichment
+
+New kills have their entity IDs (characters, corporations, alliances) resolved to
+names/tickers via ESI **at ingestion** and stored in reference tables
+(`characters`, `corporations`, `alliances`, `factions`), so the backend reads
+names with pure SQL instead of calling ESI at request time. Names are resolved
+inline (before a kill is streamed); a resolve that times out is queued in
+`entity_resolve_backlog` and retried by a background drain. Corp/alliance entries
+are re-resolved only when seen again after `entities.refresh_after_days`.
+
+**War info** (`wars` table) is resolved by a separate background scheduler because
+the ESI war endpoint is rate limited: a kill only writes a war *stub*, which the
+scheduler later fills in. Terminal (finished) wars are never re-fetched.
+
+### Backfilling historical entities
+
+`entities_backfill.py` resolves names for all pre-existing kills. It is idempotent,
+resumable, and safe to run alongside the live service (name endpoints are not rate
+limited):
+
+    python entities_backfill.py
+
+Historical **wars** backfill themselves: seed one stub per distinct `war_id` and
+let the war scheduler drain it. In a `psql` shell:
+
+    INSERT INTO wars (war_id)
+    SELECT DISTINCT war_id FROM kills WHERE war_id IS NOT NULL
+    ON CONFLICT (war_id) DO NOTHING;
+
 ## Backfill (standalone)
 
 [`backfill.py`](backfill.py) is a **standalone, archival** script that originally

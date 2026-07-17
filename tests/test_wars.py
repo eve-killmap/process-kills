@@ -63,3 +63,15 @@ def test_refresh_after_terminal_is_none():
     now = datetime(2024, 6, 1, tzinfo=timezone.utc)
     finished = now - timedelta(days=1)
     assert compute_refresh_after(finished, now, None) is None
+
+
+from wars import war_outcome
+
+
+def test_war_outcome_terminal_is_finished():
+    assert war_outcome(None) == "finished"
+
+
+def test_war_outcome_nonterminal_is_active():
+    from datetime import datetime, timezone
+    assert war_outcome(datetime(2030, 1, 1, tzinfo=timezone.utc)) == "active"

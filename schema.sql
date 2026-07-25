@@ -73,111 +73,84 @@ CREATE TABLE IF NOT EXISTS live_state (
     sequence BIGINT NOT NULL
 );
 
--- Materialized view for top 50 systems (all-time)
+-- Materialized view for kills per system, unordered (all-time)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_system
-    ON mv_kills_per_system_top (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_system
+    ON mv_kills_per_system (solar_system_id);
 
--- Materialized view for top 50 systems (last 24h)
+-- Materialized view for kills per system, unordered (last 24h)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top_24h AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_24h AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
 WHERE killmail_time >= NOW() - INTERVAL '24 hours'
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_24h_system
-    ON mv_kills_per_system_top_24h (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_24h_system
+    ON mv_kills_per_system_24h (solar_system_id);
 
--- Materialized view for top 50 systems (last 7d)
+-- Materialized view for kills per system, unordered (last 7d)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top_7d AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_7d AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
 WHERE killmail_time >= NOW() - INTERVAL '7 days'
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_7d_system
-    ON mv_kills_per_system_top_7d (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_7d_system
+    ON mv_kills_per_system_7d (solar_system_id);
 
--- Materialized view for top 50 systems (last 30d)
+-- Materialized view for kills per system, unordered (last 30d)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top_30d AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_30d AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
 WHERE killmail_time >= NOW() - INTERVAL '30 days'
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_30d_system
-    ON mv_kills_per_system_top_30d (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_30d_system
+    ON mv_kills_per_system_30d (solar_system_id);
 
--- Materialized view for top 50 systems (last 6m)
+-- Materialized view for kills per system, unordered (last 6m)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top_6m AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_6m AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
 WHERE killmail_time >= NOW() - INTERVAL '6 months'
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_6m_system
-    ON mv_kills_per_system_top_6m (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_6m_system
+    ON mv_kills_per_system_6m (solar_system_id);
 
--- Materialized view for top 50 systems (last 1y)
+-- Materialized view for kills per system, unordered (last 1y)
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_top_1y AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_1y AS
 SELECT
     solar_system_id,
     COUNT(*) AS kill_count
 FROM kills
 WHERE killmail_time >= NOW() - INTERVAL '1 year'
-GROUP BY solar_system_id
-ORDER BY kill_count DESC
-LIMIT 50;
+GROUP BY solar_system_id;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_top_1y_system
-    ON mv_kills_per_system_top_1y (solar_system_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_1y_system
+    ON mv_kills_per_system_1y (solar_system_id);
 
--- Materialized view for bottom 50 systems (all-time)
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_bottom AS
-SELECT
-    solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
-WHERE solar_system_id < 32000001
-GROUP BY solar_system_id
-ORDER BY kill_count ASC
-LIMIT 50;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_bottom_system
-    ON mv_kills_per_system_bottom (solar_system_id);
-
--- Materialized view for farthest kill 
+-- Materialized view for farthest kill
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_farthest_kill_per_system AS
 SELECT

@@ -22,13 +22,12 @@ from db import get_connection
 from stream import publish_invalidation
 
 _MATERIALIZED_VIEWS = [
-    "mv_kills_per_system_top",
-    "mv_kills_per_system_top_24h",
-    "mv_kills_per_system_top_7d",
-    "mv_kills_per_system_top_30d",
-    "mv_kills_per_system_top_6m",
-    "mv_kills_per_system_top_1y",
-    "mv_kills_per_system_bottom",
+    "mv_kills_per_system",
+    "mv_kills_per_system_24h",
+    "mv_kills_per_system_7d",
+    "mv_kills_per_system_30d",
+    "mv_kills_per_system_6m",
+    "mv_kills_per_system_1y",
 ]
 
 _WEEKLY_MATERIALIZED_VIEWS = [

@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timezone, timedelta
 
 import entities
+import facets
 import metrics
 from config import BEGIN_DATE, config
 from esi import ESIClient, Priority, parse_kill
@@ -12,6 +13,7 @@ from db import (
     get_processed_date,
     update_processed_date,
     insert_kill,
+    insert_facets,
     insert_no_position_kill,
     insert_war_stub,
     get_existing_killmail_ids,
@@ -196,6 +198,16 @@ async def _crosscheck_date(
                     if parsed["war_id"] is not None:
                         insert_war_stub(conn, parsed["war_id"])
                     await entities.ensure_kill_entities(conn, esi_client, parsed)
+                    if config.facets.enabled:
+                        try:
+                            rows = facets.collect_facets(parsed)
+                            insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
+                                          parsed["killmail_time"], rows)
+                            for kind_name, n in facets.facet_kind_counts(rows).items():
+                                metrics.facets_written.labels(kind_name).inc(n)
+                        except Exception as e:
+                            metrics.errors.labels("facets").inc()
+                            logger.warning(f"Facet write failed for kill {killmail_id}: {e}")
             else:
                 inserted = insert_no_position_kill(
                     conn, killmail_id, killmail_hash, killmail_time

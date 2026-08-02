@@ -41,7 +41,7 @@ def test_kill_facets_table_and_index_present():
     assert ("PRIMARY KEY (facet_kind, facet_value, role, "
             "solar_system_id, killmail_time, killmail_id)") in SCHEMA
     # reverse index name AND its exact column order (the ON-clause is unique to it)
-    assert "CREATE INDEX IF NOT EXISTS ix_facet_kill" in SCHEMA
+    assert "CREATE INDEX IF NOT EXISTS idx_facet_kill" in SCHEMA
     assert "ON kill_facets (killmail_id, facet_kind, facet_value, role)" in _SCHEMA_NORM
 
 
@@ -49,11 +49,11 @@ def test_pg_trgm_search_indexes_present():
     assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in SCHEMA
     # each trigram index name tied to its exact table + column + gin_trgm_ops
     for name, table, col in [
-        ("ix_characters_name_trgm", "characters", "name"),
-        ("ix_corporations_name_trgm", "corporations", "name"),
-        ("ix_corporations_ticker_trgm", "corporations", "ticker"),
-        ("ix_alliances_name_trgm", "alliances", "name"),
-        ("ix_alliances_ticker_trgm", "alliances", "ticker"),
-        ("ix_factions_name_trgm", "factions", "name"),
+        ("idx_characters_name_trgm", "characters", "name"),
+        ("idx_corporations_name_trgm", "corporations", "name"),
+        ("idx_corporations_ticker_trgm", "corporations", "ticker"),
+        ("idx_alliances_name_trgm", "alliances", "name"),
+        ("idx_alliances_ticker_trgm", "alliances", "ticker"),
+        ("idx_factions_name_trgm", "factions", "name"),
     ]:
         assert f"{name} ON {table} USING gin ({col} gin_trgm_ops)" in _SCHEMA_NORM

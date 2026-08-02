@@ -238,15 +238,15 @@ CREATE TABLE IF NOT EXISTS kill_facets (
 );
 
 -- Reverse index for multi-facet AND probes ("does kill K also carry facet F?").
-CREATE INDEX IF NOT EXISTS ix_facet_kill
+CREATE INDEX IF NOT EXISTS idx_facet_kill
     ON kill_facets (killmail_id, facet_kind, facet_value, role);
 
 -- Trigram search indexes for the filter-builder autocomplete over the reference
 -- tables (id-indexed only otherwise).
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS ix_characters_name_trgm     ON characters   USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_corporations_name_trgm   ON corporations USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_corporations_ticker_trgm ON corporations USING gin (ticker gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_alliances_name_trgm      ON alliances    USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_alliances_ticker_trgm    ON alliances    USING gin (ticker gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS ix_factions_name_trgm       ON factions     USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_characters_name_trgm     ON characters   USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_corporations_name_trgm   ON corporations USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_corporations_ticker_trgm ON corporations USING gin (ticker gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_alliances_name_trgm      ON alliances    USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_alliances_ticker_trgm    ON alliances    USING gin (ticker gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_factions_name_trgm       ON factions     USING gin (name   gin_trgm_ops);

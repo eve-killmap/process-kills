@@ -725,3 +725,25 @@ def upsert_factions(conn, rows):
             rows,
         )
     conn.commit()
+
+
+def insert_facets(conn, killmail_id, solar_system_id, killmail_time, facets):
+    """Batch-insert (facet_kind, facet_value, role) rows for one kill. Idempotent."""
+    if not facets:
+        return
+    rows = [
+        (kind, value, role, solar_system_id, killmail_time, killmail_id)
+        for kind, value, role in facets
+    ]
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO kill_facets
+                (facet_kind, facet_value, role, solar_system_id, killmail_time, killmail_id)
+            VALUES %s
+            ON CONFLICT DO NOTHING
+            """,
+            rows,
+        )
+    conn.commit()

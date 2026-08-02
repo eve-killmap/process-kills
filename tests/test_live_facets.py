@@ -54,3 +54,33 @@ def test_facets_not_written_when_disabled(monkeypatch):
     result, captured = _run(monkeypatch, enabled=False)
     assert result == "inserted"
     assert captured == {}  # hook gated off, insert_facets never called
+
+
+def test_facet_write_failure_does_not_abort_inserted(monkeypatch):
+    @contextlib.contextmanager
+    def _fake_conn():
+        yield object()
+
+    monkeypatch.setattr(live, "get_connection", _fake_conn)
+    monkeypatch.setattr(live, "insert_kill", lambda conn, parsed: True)
+    monkeypatch.setattr(live, "increment_processed_kills", lambda conn, date: None)
+    monkeypatch.setattr(live, "insert_war_stub", lambda conn, war_id: None)
+    monkeypatch.setattr(live, "_record_freshness", lambda t: None)
+
+    def _boom(conn, kid, sid, t, rows):
+        raise RuntimeError("facet db down")
+
+    monkeypatch.setattr(live, "insert_facets", _boom)
+    monkeypatch.setattr(live, "config",
+                        types.SimpleNamespace(facets=types.SimpleNamespace(enabled=True)))
+
+    data = {
+        "killmail_id": 999, "hash": "abc",
+        "esi": {"killmail_id": 999, "killmail_time": "2024-01-01T00:00:00Z",
+                "solar_system_id": 30000142,
+                "victim": {"ship_type_id": 587, "damage_taken": 1,
+                           "position": {"x": 1.0, "y": 2.0, "z": 3.0}},
+                "attackers": [], "war_id": None},
+    }
+    result, _parsed = asyncio.run(live._process_sequence_kill(data, 1, None))
+    assert result == "inserted"  # facet failure swallowed; kill still succeeds/publishes

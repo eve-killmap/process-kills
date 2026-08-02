@@ -209,11 +209,15 @@ async def _process_sequence_kill(
                 if esi is not None:
                     await entities.ensure_kill_entities(conn, esi, parsed)
                 if config.facets.enabled:
-                    rows = facets.collect_facets(parsed)
-                    insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
-                                  parsed["killmail_time"], rows)
-                    for kind_name, n in facets.facet_kind_counts(rows).items():
-                        metrics.facets_written.labels(kind_name).inc(n)
+                    try:
+                        rows = facets.collect_facets(parsed)
+                        insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
+                                      parsed["killmail_time"], rows)
+                        for kind_name, n in facets.facet_kind_counts(rows).items():
+                            metrics.facets_written.labels(kind_name).inc(n)
+                    except Exception as e:
+                        metrics.errors.labels("facets").inc()
+                        logger.warning(f"Facet write failed for kill {killmail_id}: {e}")
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))

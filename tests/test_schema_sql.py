@@ -1,4 +1,5 @@
 # tests/test_schema_sql.py
+import re
 from pathlib import Path
 
 SCHEMA = (Path(__file__).resolve().parent.parent / "schema.sql").read_text(encoding="utf-8")
@@ -29,16 +30,30 @@ def test_entity_names_are_text_not_varchar():
     assert "VARCHAR" not in entity_block
 
 
+# Collapse runs of spaces/tabs so assertions don't depend on the file's
+# column-alignment padding (newlines are preserved).
+_SCHEMA_NORM = re.sub(r"[ \t]+", " ", SCHEMA)
+
+
 def test_kill_facets_table_and_index_present():
     assert "CREATE TABLE IF NOT EXISTS kill_facets" in SCHEMA
-    assert "PRIMARY KEY (facet_kind, facet_value, role, solar_system_id, killmail_time, killmail_id)" in SCHEMA
+    # exact PK column order
+    assert ("PRIMARY KEY (facet_kind, facet_value, role, "
+            "solar_system_id, killmail_time, killmail_id)") in SCHEMA
+    # reverse index name AND its exact column order (the ON-clause is unique to it)
     assert "CREATE INDEX IF NOT EXISTS ix_facet_kill" in SCHEMA
+    assert "ON kill_facets (killmail_id, facet_kind, facet_value, role)" in _SCHEMA_NORM
 
 
 def test_pg_trgm_search_indexes_present():
     assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in SCHEMA
-    for idx in ("ix_characters_name_trgm", "ix_corporations_name_trgm",
-                "ix_corporations_ticker_trgm", "ix_alliances_name_trgm",
-                "ix_alliances_ticker_trgm", "ix_factions_name_trgm"):
-        assert idx in SCHEMA
-    assert "gin_trgm_ops" in SCHEMA
+    # each trigram index name tied to its exact table + column + gin_trgm_ops
+    for name, table, col in [
+        ("ix_characters_name_trgm", "characters", "name"),
+        ("ix_corporations_name_trgm", "corporations", "name"),
+        ("ix_corporations_ticker_trgm", "corporations", "ticker"),
+        ("ix_alliances_name_trgm", "alliances", "name"),
+        ("ix_alliances_ticker_trgm", "alliances", "ticker"),
+        ("ix_factions_name_trgm", "factions", "name"),
+    ]:
+        assert f"{name} ON {table} USING gin ({col} gin_trgm_ops)" in _SCHEMA_NORM

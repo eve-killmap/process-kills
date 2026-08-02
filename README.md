@@ -148,10 +148,9 @@ attacker) — that lets the backend filter kills by any of those at the map and
 per-system level. New kills populate it at ingestion when `facets.enabled: true`
 (built by `facets.collect_facets`).
 
-**Backfilling history** is a one-time bulk SQL operation, not a service task — see
-[`sql/README.md`](sql/README.md) and [`sql/facets_backfill.sql`](sql/facets_backfill.sql).
-Run it with `facets.enabled: false`, then enable the hook and run the catch-up.
-It's large (~1B rows) and I/O-heavy; run it in a low-traffic window.
+**Backfilling history** is a one-time bulk SQL operation, not a service task: run it
+with `facets.enabled: false`, then enable the hook and run a catch-up pass for the
+load window. It's large (~1B rows) and I/O-heavy; run it in a low-traffic window.
 
 ## Backfill (standalone)
 

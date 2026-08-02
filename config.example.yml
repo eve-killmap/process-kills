@@ -107,6 +107,6 @@ factions:
 
 # Kill facets: an inverted index for filtering kills by ship/character/corp/
 # alliance/faction/war/weapon. The ingestion hook is disabled by default; enable
-# it only AFTER the one-time backfill (see sql/README.md).
+# it only AFTER the one-time historical backfill.
 facets:
   enabled: false

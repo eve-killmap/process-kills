@@ -1,7 +1,7 @@
 """Kill facets: an inverted-index row per (kill, distinct filterable attribute).
 
 `collect_facets` is the REFERENCE definition of which facet rows a kill produces;
-the one-time SQL backfill (sql/facets_backfill.sql) mirrors it exactly. Pure — no
+the one-time SQL backfill mirrors it exactly. Pure — no
 I/O — so it is unit-tested directly.
 
 Design: docs/superpowers/specs/2026-08-01-kill-faceted-filtering-design.md

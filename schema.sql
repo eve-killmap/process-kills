@@ -221,3 +221,32 @@ CREATE TABLE IF NOT EXISTS entity_resolve_backlog (
     queued_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     attempts    SMALLINT NOT NULL DEFAULT 0
 );
+
+-- Kill facets: one row per (kill, distinct filterable attribute). Populated at
+-- ingestion (facets.collect_facets) and by the one-time bulk backfill.
+-- facet_kind: 1 char 2 corp 3 alliance 4 faction 5 ship 6 weapon 7 war
+-- role:       0 victim 1 attacker 2 kill-level
+
+CREATE TABLE IF NOT EXISTS kill_facets (
+    facet_kind      SMALLINT    NOT NULL,
+    facet_value     BIGINT      NOT NULL,
+    role            SMALLINT    NOT NULL,
+    solar_system_id INTEGER     NOT NULL,
+    killmail_time   TIMESTAMPTZ NOT NULL,
+    killmail_id     BIGINT      NOT NULL,
+    PRIMARY KEY (facet_kind, facet_value, role, solar_system_id, killmail_time, killmail_id)
+);
+
+-- Reverse index for multi-facet AND probes ("does kill K also carry facet F?").
+CREATE INDEX IF NOT EXISTS ix_facet_kill
+    ON kill_facets (killmail_id, facet_kind, facet_value, role);
+
+-- Trigram search indexes for the filter-builder autocomplete over the reference
+-- tables (id-indexed only otherwise).
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX IF NOT EXISTS ix_characters_name_trgm     ON characters   USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_corporations_name_trgm   ON corporations USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_corporations_ticker_trgm ON corporations USING gin (ticker gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_alliances_name_trgm      ON alliances    USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_alliances_ticker_trgm    ON alliances    USING gin (ticker gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS ix_factions_name_trgm       ON factions     USING gin (name   gin_trgm_ops);

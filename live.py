@@ -8,6 +8,7 @@ from typing import Any
 import aiohttp
 
 import entities
+import facets
 import metrics
 import stream
 from config import BEGIN_DATE, config
@@ -18,6 +19,7 @@ from db import (
     get_live_sequence,
     set_live_sequence,
     insert_kill,
+    insert_facets,
     insert_no_position_kill,
     insert_war_stub,
     increment_processed_kills,
@@ -206,6 +208,12 @@ async def _process_sequence_kill(
                     insert_war_stub(conn, parsed["war_id"])
                 if esi is not None:
                     await entities.ensure_kill_entities(conn, esi, parsed)
+                if config.facets.enabled:
+                    rows = facets.collect_facets(parsed)
+                    insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
+                                  parsed["killmail_time"], rows)
+                    for kind_name, n in facets.facet_kind_counts(rows).items():
+                        metrics.facets_written.labels(kind_name).inc(n)
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))

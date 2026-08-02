@@ -140,6 +140,19 @@ SELECT DISTINCT war_id FROM kills WHERE war_id IS NOT NULL
 ON CONFLICT (war_id) DO NOTHING;
 ```
 
+## Kill facets (filtering)
+
+`kill_facets` is an inverted index — one row per (kill, distinct filterable
+attribute: ship, character, corp, alliance, faction, war, weapon; victim vs
+attacker) — that lets the backend filter kills by any of those at the map and
+per-system level. New kills populate it at ingestion when `facets.enabled: true`
+(built by `facets.collect_facets`).
+
+**Backfilling history** is a one-time bulk SQL operation, not a service task — see
+[`sql/README.md`](sql/README.md) and [`sql/facets_backfill.sql`](sql/facets_backfill.sql).
+Run it with `facets.enabled: false`, then enable the hook and run the catch-up.
+It's large (~1B rows) and I/O-heavy; run it in a low-traffic window.
+
 ## Backfill (standalone)
 
 [`backfill.py`](backfill.py) is a **standalone, archival** script that originally

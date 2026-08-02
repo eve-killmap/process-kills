@@ -219,7 +219,7 @@ redis_connected = Gauge(
 errors = Counter(
     "eve_killmap_errors",
     "Unhandled errors caught in a scheduler/loop, by component.",
-    ["component"],  # live|crosscheck|recheck|maintenance|mv_refresh|entities|wars|factions|entity_backlog
+    ["component"],  # live|crosscheck|recheck|maintenance|mv_refresh|entities|wars|factions|entity_backlog|facets
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",
@@ -269,6 +269,11 @@ factions_refreshed = Counter(
     "eve_killmap_factions_refreshed",
     "Faction table refresh runs, by result.",
     ["result"],  # success|failed
+)
+facets_written = Counter(
+    "eve_killmap_facets_written",
+    "Facet rows written at ingestion, by facet kind.",
+    ["kind"],  # character|corporation|alliance|faction|ship|weapon|war
 )
 
 

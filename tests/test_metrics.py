@@ -57,3 +57,10 @@ def test_wars_pending_gauge_can_be_set():
 def test_entity_backlog_depth_gauge_can_be_set():
     metrics.entity_backlog_depth.set(3)
     assert _val("eve_killmap_entity_backlog_depth") == 3
+
+
+def test_facets_written_counter_is_labeled():
+    labels = {"kind": "character"}
+    before = _val("eve_killmap_facets_written_total", labels) or 0.0
+    metrics.facets_written.labels("character").inc(3)
+    assert _val("eve_killmap_facets_written_total", labels) == before + 3

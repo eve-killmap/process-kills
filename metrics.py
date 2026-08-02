@@ -275,6 +275,11 @@ facets_written = Counter(
     "Facet rows written at ingestion, by facet kind.",
     ["kind"],  # character|corporation|alliance|faction|ship|weapon|war
 )
+facets_write_seconds = Histogram(
+    "eve_killmap_facets_write_seconds",
+    "Time to write all facet rows for one kill (insert_facets round-trip). "
+    "The _count series doubles as the per-kill facet-write throughput.",
+)
 
 
 _started = False

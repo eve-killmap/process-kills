@@ -297,3 +297,12 @@ def test_entities_invalid_concurrency_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "entities:\n  max_concurrency: 0\n")
     with pytest.raises(ConfigError):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_facets_disabled_by_default_and_toggleable(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.facets.enabled is False
+
+    yaml_path = write_yaml(tmp_path, "facets:\n  enabled: true\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.facets.enabled is True

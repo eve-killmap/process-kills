@@ -176,6 +176,11 @@ class FactionsConfig:
 
 
 @dataclass(frozen=True)
+class FacetsConfig:
+    enabled: bool
+
+
+@dataclass(frozen=True)
 class Paths:
     base_dir: Path
     data_dir: Path
@@ -198,6 +203,7 @@ class Config:
     entities: EntitiesConfig
     wars: WarsConfig
     factions: FactionsConfig
+    facets: FacetsConfig
     user_agent: str
     database_url: str | None
     redis_url: str
@@ -291,6 +297,7 @@ def load_config(
     entities_cfg = _section(data, "entities")
     wars_cfg = _section(data, "wars")
     factions_cfg = _section(data, "factions")
+    facets_cfg = _section(data, "facets")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -459,6 +466,10 @@ def load_config(
         ),
     )
 
+    facets_config = FacetsConfig(
+        enabled=bool(facets_cfg.get("enabled", False)),
+    )
+
     data_dir = Path(env.get("DATA_DIR") or base_dir / "data")
     paths = Paths(base_dir=base_dir, data_dir=data_dir)
 
@@ -478,6 +489,7 @@ def load_config(
         entities=entities_config,
         wars=wars_config,
         factions=factions_config,
+        facets=facets_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,

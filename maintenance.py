@@ -32,6 +32,7 @@ _MATERIALIZED_VIEWS = [
 
 _WEEKLY_MATERIALIZED_VIEWS = [
     "mv_farthest_kill_per_system",
+    "mv_weapon_search",
 ]
 
 logger = logging.getLogger(__name__)

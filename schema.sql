@@ -250,3 +250,21 @@ CREATE INDEX IF NOT EXISTS idx_corporations_ticker_trgm ON corporations USING gi
 CREATE INDEX IF NOT EXISTS idx_alliances_name_trgm      ON alliances    USING gin (name   gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_alliances_ticker_trgm    ON alliances    USING gin (ticker gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_factions_name_trgm       ON factions     USING gin (name   gin_trgm_ops);
+
+-- Source for attacker weapon autocomplete searching
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_weapon_search AS
+SELECT t.id AS type_id, t.name
+FROM types t
+WHERE t.published
+  AND EXISTS (
+      SELECT 1 FROM kill_facets f
+      WHERE f.facet_kind = 6 AND f.role = 1 AND f.facet_value = t.id
+  );
+
+-- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_weapon_search_type_id
+    ON mv_weapon_search (type_id);
+
+-- Trigram index for the ILIKE name autocomplete (headroom; the weapon set is small).
+CREATE INDEX IF NOT EXISTS idx_mv_weapon_search_name_trgm
+    ON mv_weapon_search USING gin (name gin_trgm_ops);

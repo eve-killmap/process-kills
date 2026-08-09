@@ -193,7 +193,9 @@ class ESIClient:
                         return await resp.json()
                     elif resp.status in (420, 429):
                         metrics.esi_requests.labels("rate_limited").inc()
-                        metrics.esi_request_seconds.labels("rate_limited").observe(elapsed)
+                        metrics.esi_request_seconds.labels("rate_limited").observe(
+                            elapsed
+                        )
                         metrics.esi_rate_limited.inc()
                         retry_after = max(int(resp.headers.get("Retry-After", 60)), 60)
                         logger.warning(
@@ -207,7 +209,9 @@ class ESIClient:
                         continue
                     elif resp.status in (502, 503, 504):
                         metrics.esi_requests.labels("server_error").inc()
-                        metrics.esi_request_seconds.labels("server_error").observe(elapsed)
+                        metrics.esi_request_seconds.labels("server_error").observe(
+                            elapsed
+                        )
                         logger.warning(
                             f"ESI returned {resp.status} for killmail {killmail_id}. "
                             f"Retrying in 5s (attempt {attempt + 1}/3)."
@@ -259,7 +263,9 @@ class ESIClient:
                         return await resp.json()
                     if resp.status in (420, 429):
                         metrics.esi_requests.labels("rate_limited").inc()
-                        metrics.esi_request_seconds.labels("rate_limited").observe(elapsed)
+                        metrics.esi_request_seconds.labels("rate_limited").observe(
+                            elapsed
+                        )
                         metrics.esi_rate_limited.inc()
                         retry_after = max(int(resp.headers.get("Retry-After", 60)), 60)
                         logger.warning(
@@ -272,7 +278,9 @@ class ESIClient:
                         continue
                     if resp.status in (502, 503, 504):
                         metrics.esi_requests.labels("server_error").inc()
-                        metrics.esi_request_seconds.labels("server_error").observe(elapsed)
+                        metrics.esi_request_seconds.labels("server_error").observe(
+                            elapsed
+                        )
                         await asyncio.sleep(5)
                         continue
                     if resp.status == 404:

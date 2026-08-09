@@ -13,7 +13,7 @@ import metrics
 import stream as kill_stream
 from crosscheck import crosscheck_scheduler
 from recheck import no_position_rechecking
-from maintenance import maintenance_scheduler, mv_refresh_scheduler
+from mv_refresh import fast_refresh_scheduler, slow_refresh_scheduler
 import entities
 import wars
 import factions
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="EVE Killmap kill-ingestion service (live listener, "
-        "cross-checker, optional rechecking, and maintenance)."
+        "cross-checker, optional rechecking, and view refresh)."
     )
     return parser.parse_args()
 
@@ -69,13 +69,11 @@ async def main() -> None:
             )
     metrics.redis_connected.set(1 if redis_client is not None else 0)
 
-    live_paused = asyncio.Event()
-
     tasks = [
-        live_listener(shutdown_event, live_paused, redis=redis_client, esi=esi_client),
+        live_listener(shutdown_event, redis=redis_client, esi=esi_client),
         crosscheck_scheduler(esi_client, shutdown_event),
-        maintenance_scheduler(shutdown_event, live_paused, redis=redis_client),
-        mv_refresh_scheduler(shutdown_event, redis=redis_client),
+        fast_refresh_scheduler(shutdown_event, redis=redis_client),
+        slow_refresh_scheduler(shutdown_event, redis=redis_client),
         entities.entity_backlog_scheduler(esi_client, shutdown_event),
         wars.war_scheduler(esi_client, shutdown_event),
         factions.faction_scheduler(esi_client, shutdown_event),
@@ -85,8 +83,8 @@ async def main() -> None:
 
     recheck_state = "enabled" if config.recheck.enabled else "disabled"
     logger.info(
-        f"Service started. Running live listener, cross-checker, weekly "
-        f"maintenance (no-position rechecking {recheck_state})."
+        f"Service started. Running live listener, cross-checker, view "
+        f"refresh (no-position rechecking {recheck_state})."
     )
 
     try:

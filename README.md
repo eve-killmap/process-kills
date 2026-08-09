@@ -43,7 +43,7 @@ cp config.example.yml config.yml # optional; omit to use built-in defaults
 ## Running
 
 ```sh
-python main.py        # start the ingestion service (live + cross-check + maintenance)
+python main.py        # start the ingestion service (live + cross-check + view refresh)
 python main.py --help # show usage and exit
 ```
 
@@ -76,7 +76,7 @@ Secrets are never written to the log.
 Sections: `logging` (level, rotation), `sources` (upstream endpoint URLs), `esi`
 (token-bucket rate limit), `live` (poll/retry delays), `recheck` (the optional
 no-position rechecking pass; see below), `crosscheck` (daily run hour),
-`maintenance` (weekly cluster day/hour, materialized-view refresh hours),
+`refresh` (slow/weekly view-refresh day/hour, fast-refresh hours),
 `processing` (batch size), `backfill` (download settings for the standalone
 script), and `metrics` (Prometheus exporter; see below). See
 [`config.example.yml`](config.example.yml) for the full documented set. Invalid
@@ -89,7 +89,7 @@ With `metrics.enabled: true`, the service exposes a Prometheus scrape endpoint a
 Prometheus to pull. It is **disabled by default** (enabling opens a listening
 socket). All metrics are **application-level**: throughput
 (`eve_killmap_kills_processed_total`), freshness (`eve_killmap_killmail_lag_seconds`),
-ESI/zKillboard dependency health, job status (cross-check / recheck / maintenance),
+ESI/zKillboard dependency health, job status (cross-check / recheck / view refresh),
 streaming + cache-invalidation, and an `eve_killmap_errors_total` catch-all,
 plus the client's standard process/GC collectors (Linux only). PostgreSQL
 internals are intentionally left to a separate DB exporter. Metric names are

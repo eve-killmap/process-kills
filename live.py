@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 async def live_listener(
     shutdown_event: asyncio.Event,
-    live_paused: asyncio.Event | None = None,
     redis: Any = None,
     esi: Any = None,
 ) -> None:
@@ -57,18 +56,6 @@ async def live_listener(
             logger.info(f"Live listener resuming from sequence {sequence}.")
 
         while not shutdown_event.is_set():
-            if live_paused and live_paused.is_set():
-                logger.info("Live listener paused for maintenance.")
-                metrics.live_listener_paused.set(1)
-                pause_start = time.monotonic()
-                while live_paused.is_set() and not shutdown_event.is_set():
-                    await asyncio.sleep(1)
-                metrics.live_pause_seconds.inc(time.monotonic() - pause_start)
-                metrics.live_listener_paused.set(0)
-                if shutdown_event.is_set():
-                    break
-                logger.info("Live listener resumed.")
-
             try:
                 url = config.sources.r2z2_ephemeral_url.format(sequence=sequence)
                 fetch_start = time.monotonic()
@@ -212,14 +199,23 @@ async def _process_sequence_kill(
                     try:
                         rows = facets.collect_facets(parsed)
                         facet_start = time.monotonic()
-                        insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
-                                      parsed["killmail_time"], rows)
-                        metrics.facets_write_seconds.observe(time.monotonic() - facet_start)
+                        insert_facets(
+                            conn,
+                            parsed["killmail_id"],
+                            parsed["solar_system_id"],
+                            parsed["killmail_time"],
+                            rows,
+                        )
+                        metrics.facets_write_seconds.observe(
+                            time.monotonic() - facet_start
+                        )
                         for kind_name, n in facets.facet_kind_counts(rows).items():
                             metrics.facets_written.labels(kind_name).inc(n)
                     except Exception as e:
                         metrics.errors.labels("facets").inc()
-                        logger.warning(f"Facet write failed for kill {killmail_id}: {e}")
+                        logger.warning(
+                            f"Facet write failed for kill {killmail_id}: {e}"
+                        )
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))
@@ -247,7 +243,9 @@ def _record_freshness(killmail_time: str) -> None:
     epoch = stream.killmail_epoch(killmail_time)
     if epoch is not None:
         metrics.last_processed_killmail_timestamp.set(epoch)
-        metrics.killmail_lag_seconds.labels("live").observe(max(0.0, time.time() - epoch))
+        metrics.killmail_lag_seconds.labels("live").observe(
+            max(0.0, time.time() - epoch)
+        )
 
 
 async def _interruptible_sleep(seconds: float, shutdown_event: asyncio.Event) -> None:

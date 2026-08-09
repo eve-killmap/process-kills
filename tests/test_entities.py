@@ -46,7 +46,9 @@ def test_collects_victim_and_attacker_ids_excluding_factions():
 
 
 def test_npc_victim_has_no_character_id():
-    kill = _kill(victim_character_id=None, victim_corporation_id=None, victim_alliance_id=None)
+    kill = _kill(
+        victim_character_id=None, victim_corporation_id=None, victim_alliance_id=None
+    )
     ids = collect_entity_ids(kill)
     assert ids.characters == frozenset()
     assert ids.corporations == frozenset()
@@ -99,17 +101,31 @@ def test_ensure_kill_entities_swallows_errors_and_enqueues(monkeypatch):
     async def boom(*a, **k):
         raise RuntimeError("esi down")
 
-    monkeypatch.setattr(entities, "find_unfresh", lambda *a, **k: EntityIds(
-        frozenset({1}), frozenset(), frozenset()))
+    monkeypatch.setattr(
+        entities,
+        "find_unfresh",
+        lambda *a, **k: EntityIds(frozenset({1}), frozenset(), frozenset()),
+    )
     monkeypatch.setattr(entities, "resolve_and_store", boom)
-    monkeypatch.setattr(db, "enqueue_entity_backlog", lambda c, kid: enqueued.append(kid))
+    monkeypatch.setattr(
+        db, "enqueue_entity_backlog", lambda c, kid: enqueued.append(kid)
+    )
 
     parsed = {
-        "killmail_id": 777, "killmail_hash": "h", "killmail_time": "t",
-        "solar_system_id": 1, "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
-        "victim_character_id": 1, "victim_corporation_id": None,
-        "victim_alliance_id": None, "victim_faction_id": None,
-        "victim_damage_taken": 0, "victim_ship_type_id": 1, "war_id": None,
+        "killmail_id": 777,
+        "killmail_hash": "h",
+        "killmail_time": "t",
+        "solar_system_id": 1,
+        "position_x": 0.0,
+        "position_y": 0.0,
+        "position_z": 0.0,
+        "victim_character_id": 1,
+        "victim_corporation_id": None,
+        "victim_alliance_id": None,
+        "victim_faction_id": None,
+        "victim_damage_taken": 0,
+        "victim_ship_type_id": 1,
+        "war_id": None,
         "attackers": [],
     }
     ok = asyncio.run(entities.ensure_kill_entities(None, object(), parsed))
@@ -119,8 +135,11 @@ def test_ensure_kill_entities_swallows_errors_and_enqueues(monkeypatch):
 
 def test_ensure_kill_entities_noop_when_all_fresh(monkeypatch):
     # Kill HAS ids, but find_unfresh reports them all fresh -> no ESI, no enqueue.
-    monkeypatch.setattr(entities, "find_unfresh", lambda *a, **k: EntityIds(
-        frozenset(), frozenset(), frozenset()))
+    monkeypatch.setattr(
+        entities,
+        "find_unfresh",
+        lambda *a, **k: EntityIds(frozenset(), frozenset(), frozenset()),
+    )
     resolved = []
 
     async def spy_resolve(*a, **k):
@@ -130,11 +149,20 @@ def test_ensure_kill_entities_noop_when_all_fresh(monkeypatch):
     called = []
     monkeypatch.setattr(db, "enqueue_entity_backlog", lambda c, kid: called.append(kid))
     parsed = {
-        "killmail_id": 1, "killmail_hash": "h", "killmail_time": "t",
-        "solar_system_id": 1, "position_x": 0.0, "position_y": 0.0, "position_z": 0.0,
-        "victim_character_id": 5, "victim_corporation_id": None,
-        "victim_alliance_id": None, "victim_faction_id": None,
-        "victim_damage_taken": 0, "victim_ship_type_id": 1, "war_id": None,
+        "killmail_id": 1,
+        "killmail_hash": "h",
+        "killmail_time": "t",
+        "solar_system_id": 1,
+        "position_x": 0.0,
+        "position_y": 0.0,
+        "position_z": 0.0,
+        "victim_character_id": 5,
+        "victim_corporation_id": None,
+        "victim_alliance_id": None,
+        "victim_faction_id": None,
+        "victim_damage_taken": 0,
+        "victim_ship_type_id": 1,
+        "war_id": None,
         "attackers": [],
     }
     ok = asyncio.run(entities.ensure_kill_entities(None, object(), parsed))
@@ -147,25 +175,32 @@ def test_resolve_and_store_counts_each_corp_once(monkeypatch):
     from prometheus_client import REGISTRY
 
     def val(outcome):
-        return REGISTRY.get_sample_value(
-            "eve_killmap_entities_resolved_total",
-            {"kind": "corporation", "outcome": outcome},
-        ) or 0.0
+        return (
+            REGISTRY.get_sample_value(
+                "eve_killmap_entities_resolved_total",
+                {"kind": "corporation", "outcome": outcome},
+            )
+            or 0.0
+        )
 
     class _Esi:
         async def resolve_names(self, ids):
             return {}
+
         async def get_corporation(self, cid):
             if cid == 1:
-                return ("CorpOne", "ONE")   # resolved
+                return ("CorpOne", "ONE")  # resolved
             if cid == 2:
-                return None                  # not_found (404)
-            raise RuntimeError("boom")       # error (cid == 3)
+                return None  # not_found (404)
+            raise RuntimeError("boom")  # error (cid == 3)
+
         async def get_alliance(self, aid):
             return None
 
     upserted = []
-    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: upserted.extend(rows))
+    monkeypatch.setattr(
+        db, "upsert_corporations", lambda conn, rows: upserted.extend(rows)
+    )
     monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
     monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: None)
 
@@ -179,7 +214,7 @@ def test_resolve_and_store_counts_each_corp_once(monkeypatch):
     assert after["error"] - before["error"] == 1
 
     upserted_ids = {r[0] for r in upserted}
-    assert 3 not in upserted_ids   # errored corp NOT tombstoned (will retry)
+    assert 3 not in upserted_ids  # errored corp NOT tombstoned (will retry)
     assert upserted_ids == {1, 2}  # only the resolved + genuine-404 ids written
 
 
@@ -188,7 +223,7 @@ def test_resolve_and_store_does_not_tombstone_failed_characters(monkeypatch):
 
     class _Esi:
         async def resolve_names(self, ids):
-            return {1: "Alice"}, {2}   # 1 resolved, 2 failed transiently
+            return {1: "Alice"}, {2}  # 1 resolved, 2 failed transiently
 
         async def get_corporation(self, cid):
             return None
@@ -196,7 +231,9 @@ def test_resolve_and_store_does_not_tombstone_failed_characters(monkeypatch):
         async def get_alliance(self, aid):
             return None
 
-    monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: upserted.extend(rows))
+    monkeypatch.setattr(
+        db, "upsert_characters", lambda conn, rows: upserted.extend(rows)
+    )
     monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: None)
     monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
 
@@ -204,8 +241,8 @@ def test_resolve_and_store_does_not_tombstone_failed_characters(monkeypatch):
     asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))
 
     upserted_ids = {r[0] for r in upserted}
-    assert 1 in upserted_ids       # resolved character written
-    assert 2 not in upserted_ids   # failed character NOT tombstoned (will retry)
+    assert 1 in upserted_ids  # resolved character written
+    assert 2 not in upserted_ids  # failed character NOT tombstoned (will retry)
 
 
 def test_ensure_kill_entities_never_raises_on_malformed_parsed(monkeypatch):

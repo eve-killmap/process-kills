@@ -45,11 +45,11 @@ crosscheck:
   # Hour (UTC) of the daily cross-check against zKillboard totals.
   hour: 1
 
-maintenance:
-  # Weekly CLUSTER + ANALYZE: day (0=Monday .. 6=Sunday) and hour (UTC).
+refresh:
+  # Slow (weekly) materialized-view refresh: day (0=Monday .. 6=Sunday) and hour (UTC).
   day: 6
   hour: 4
-  # Hours (UTC) at which materialized views are refreshed.
+  # Hours (UTC) at which the fast materialized views are refreshed.
   mv_refresh_hours: [0, 6, 12, 18]
 
 streaming:

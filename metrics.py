@@ -34,7 +34,10 @@ _DURATION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600, 7200, 21600)
 kills_processed = Counter(
     "eve_killmap_kills_processed",
     "Killmails processed, by pipeline source and outcome.",
-    ["source", "outcome"],  # source: live|crosscheck|recheck  outcome: inserted|no_position|duplicate|skipped
+    [
+        "source",
+        "outcome",
+    ],  # source: live|crosscheck|recheck  outcome: inserted|no_position|duplicate|skipped
 )
 attackers_inserted = Counter(
     "eve_killmap_attackers_inserted",
@@ -72,14 +75,6 @@ live_sequence_fetch_seconds = Histogram(
     "eve_killmap_live_sequence_fetch_seconds",
     "Latency of an R2Z2 sequence fetch.",
 )
-live_listener_paused = Gauge(
-    "eve_killmap_live_listener_paused",
-    "1 while the live listener is paused for maintenance, else 0.",
-)
-live_pause_seconds = Counter(
-    "eve_killmap_live_pause_seconds",
-    "Cumulative seconds the live listener has been paused for maintenance.",
-)
 
 
 # ESI client
@@ -87,7 +82,9 @@ live_pause_seconds = Counter(
 esi_requests = Counter(
     "eve_killmap_esi_requests",
     "ESI killmail fetch responses, by outcome.",
-    ["outcome"],  # success|not_found|rate_limited|server_error|error|network_error|exhausted
+    [
+        "outcome"
+    ],  # success|not_found|rate_limited|server_error|error|network_error|exhausted
 )
 esi_request_seconds = Histogram(
     "eve_killmap_esi_request_seconds",
@@ -172,23 +169,23 @@ recheck_last_run_timestamp = Gauge(
 )
 
 
-# Maintenance
+# Materialized-view refresh
 
-maintenance_runs = Counter(
-    "eve_killmap_maintenance_runs",
-    "Maintenance job runs, by task and result.",
-    ["task", "result"],  # task: mv_refresh|weekly  result: success|failed
+mv_refresh_runs = Counter(
+    "eve_killmap_mv_refresh_runs",
+    "Materialized-view refresh runs, by cadence and result.",
+    ["cadence", "result"],  # cadence: fast|slow  result: success|failed
 )
-maintenance_duration_seconds = Histogram(
-    "eve_killmap_maintenance_duration_seconds",
-    "Duration of a maintenance task.",
-    ["task"],
+mv_refresh_duration_seconds = Histogram(
+    "eve_killmap_mv_refresh_duration_seconds",
+    "Duration of a materialized-view refresh run.",
+    ["cadence"],
     buckets=_DURATION_BUCKETS,
 )
-maintenance_last_success_timestamp = Gauge(
-    "eve_killmap_maintenance_last_success_timestamp_seconds",
-    "Unix time of the last successful run of a maintenance task.",
-    ["task"],
+mv_refresh_last_success_timestamp = Gauge(
+    "eve_killmap_mv_refresh_last_success_timestamp_seconds",
+    "Unix time of the last successful materialized-view refresh, by cadence.",
+    ["cadence"],
 )
 
 
@@ -206,7 +203,10 @@ stream_kills_discarded = Counter(
 cache_invalidations_published = Counter(
     "eve_killmap_cache_invalidations_published",
     "Cache-invalidation messages published, by target and result.",
-    ["target", "result"],  # target: system_rankings|farthest_kill  result: success|failed
+    [
+        "target",
+        "result",
+    ],  # target: system_rankings|farthest_kill  result: success|failed
 )
 redis_connected = Gauge(
     "eve_killmap_redis_connected",
@@ -219,7 +219,9 @@ redis_connected = Gauge(
 errors = Counter(
     "eve_killmap_errors",
     "Unhandled errors caught in a scheduler/loop, by component.",
-    ["component"],  # live|crosscheck|recheck|maintenance|mv_refresh|entities|wars|factions|entity_backlog|facets
+    [
+        "component"
+    ],  # live|crosscheck|recheck|mv_refresh|entities|wars|factions|entity_backlog|facets
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",
@@ -236,7 +238,10 @@ service_info = Info(
 entities_resolved = Counter(
     "eve_killmap_entities_resolved",
     "Entities resolved via ESI, by kind and outcome.",
-    ["kind", "outcome"],  # kind: character|corporation|alliance  outcome: resolved|not_found|error
+    [
+        "kind",
+        "outcome",
+    ],  # kind: character|corporation|alliance  outcome: resolved|not_found|error
 )
 entity_resolve_seconds = Histogram(
     "eve_killmap_entity_resolve_seconds",

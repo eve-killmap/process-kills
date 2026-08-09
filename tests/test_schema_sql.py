@@ -2,7 +2,9 @@
 import re
 from pathlib import Path
 
-SCHEMA = (Path(__file__).resolve().parent.parent / "schema.sql").read_text(encoding="utf-8")
+SCHEMA = (Path(__file__).resolve().parent.parent / "schema.sql").read_text(
+    encoding="utf-8"
+)
 
 
 def test_entity_tables_present():
@@ -38,8 +40,10 @@ _SCHEMA_NORM = re.sub(r"[ \t]+", " ", SCHEMA)
 def test_kill_facets_table_and_index_present():
     assert "CREATE TABLE IF NOT EXISTS kill_facets" in SCHEMA
     # exact PK column order
-    assert ("PRIMARY KEY (facet_kind, facet_value, role, "
-            "solar_system_id, killmail_time, killmail_id)") in SCHEMA
+    assert (
+        "PRIMARY KEY (facet_kind, facet_value, role, "
+        "solar_system_id, killmail_time, killmail_id)"
+    ) in SCHEMA
     # reverse index name AND its exact column order (the ON-clause is unique to it)
     assert "CREATE INDEX IF NOT EXISTS idx_facet_kill" in SCHEMA
     assert "ON kill_facets (killmail_id, facet_kind, facet_value, role)" in _SCHEMA_NORM

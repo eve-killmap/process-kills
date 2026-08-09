@@ -18,9 +18,10 @@ CREATE TABLE IF NOT EXISTS kills (
     inserted_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_kills_system ON kills (solar_system_id);
 CREATE INDEX IF NOT EXISTS idx_kills_time ON kills (killmail_time);
-CREATE INDEX IF NOT EXISTS idx_kills_system_time ON kills (solar_system_id, killmail_time);
+CREATE INDEX IF NOT EXISTS idx_kills_system_time_covering
+    ON kills (solar_system_id, killmail_time)
+    INCLUDE (killmail_id, position_x, position_y, position_z, victim_ship_type_id);
 CREATE INDEX IF NOT EXISTS idx_kills_system_inserted ON kills (solar_system_id, inserted_time);
 
 -- Attackers table to store information about attackers in each killmail

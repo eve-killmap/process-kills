@@ -27,9 +27,9 @@ def test_defaults_used_when_no_yaml_and_empty_env(tmp_path):
     assert cfg.live.poll_delay == pytest.approx(0.1)
     assert cfg.live.retry_delay == pytest.approx(6.0)
     assert cfg.crosscheck.hour == 1
-    assert cfg.maintenance.day == 6
-    assert cfg.maintenance.hour == 4
-    assert cfg.maintenance.mv_refresh_hours == [0, 6, 12, 18]
+    assert cfg.refresh.day == 6
+    assert cfg.refresh.hour == 4
+    assert cfg.refresh.mv_refresh_hours == [0, 6, 12, 18]
     assert cfg.streaming.stream_name == "kills:live"
     assert cfg.streaming.stream_max_length == 1000
     assert cfg.streaming.discard_older_than == 7200
@@ -163,14 +163,14 @@ def test_crosscheck_hour_out_of_range_raises(tmp_path):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
-def test_maintenance_day_out_of_range_raises(tmp_path):
-    yaml_path = write_yaml(tmp_path, "maintenance:\n  day: 7\n")
-    with pytest.raises(ConfigError, match="maintenance.day"):
+def test_refresh_day_out_of_range_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "refresh:\n  day: 7\n")
+    with pytest.raises(ConfigError, match="refresh.day"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
 def test_mv_refresh_hours_must_be_int_list(tmp_path):
-    yaml_path = write_yaml(tmp_path, "maintenance:\n  mv_refresh_hours: 6\n")
+    yaml_path = write_yaml(tmp_path, "refresh:\n  mv_refresh_hours: 6\n")
     with pytest.raises(ConfigError, match="mv_refresh_hours"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
@@ -254,8 +254,14 @@ def test_setup_logging_applies_level(tmp_path):
 def test_esi_entity_source_urls_have_defaults(tmp_path):
     cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
     assert cfg.sources.esi_names_url == "https://esi.evetech.net/universe/names/"
-    assert cfg.sources.esi_corporation_url == "https://esi.evetech.net/corporations/{corporation_id}/"
-    assert cfg.sources.esi_alliance_url == "https://esi.evetech.net/alliances/{alliance_id}/"
+    assert (
+        cfg.sources.esi_corporation_url
+        == "https://esi.evetech.net/corporations/{corporation_id}/"
+    )
+    assert (
+        cfg.sources.esi_alliance_url
+        == "https://esi.evetech.net/alliances/{alliance_id}/"
+    )
     assert cfg.sources.esi_factions_url == "https://esi.evetech.net/universe/factions/"
     assert cfg.sources.esi_war_url == "https://esi.evetech.net/wars/{war_id}/"
 

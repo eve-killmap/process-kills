@@ -50,7 +50,9 @@ async def _backfill_kind(esi, reader, kind: str) -> None:
             unfresh_full = EntityIds(frozenset(), frozenset(), id_set)
         with db.get_connection() as conn:
             unfresh = entities.find_unfresh(
-                conn, unfresh_full, datetime.now(timezone.utc),
+                conn,
+                unfresh_full,
+                datetime.now(timezone.utc),
                 config.entities.refresh_after_days,
             )
             await entities.resolve_and_store(

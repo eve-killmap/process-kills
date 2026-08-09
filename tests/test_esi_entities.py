@@ -32,6 +32,7 @@ class _FakeSession:
 
 class _FakeGetSession:
     """Returns a preset response for .get(url)."""
+
     def __init__(self, resp):
         self._resp = resp
         self.urls = []
@@ -72,8 +73,8 @@ def test_resolve_names_absent_id_from_200_is_not_failed():
 
     client = _client_with_session(_PartialSession())
     resolved, failed = asyncio.run(client.resolve_names({1, 2, 3}))
-    assert len(resolved) == 2      # one id omitted from the 200
-    assert failed == set()         # omitted id is NOT failed (tombstones instead)
+    assert len(resolved) == 2  # one id omitted from the 200
+    assert failed == set()  # omitted id is NOT failed (tombstones instead)
 
 
 def test_get_corporation_success_returns_name_and_ticker():

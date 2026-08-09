@@ -120,7 +120,7 @@ class CrosscheckConfig:
 
 
 @dataclass(frozen=True)
-class MaintenanceConfig:
+class RefreshConfig:
     day: int
     hour: int
     mv_refresh_hours: list[int]
@@ -195,7 +195,7 @@ class Config:
     live: LiveConfig
     recheck: RecheckConfig
     crosscheck: CrosscheckConfig
-    maintenance: MaintenanceConfig
+    refresh: RefreshConfig
     streaming: StreamingConfig
     processing: ProcessingConfig
     backfill: BackfillConfig
@@ -289,7 +289,7 @@ def load_config(
     live_cfg = _section(data, "live")
     recheck_cfg = _section(data, "recheck")
     cross_cfg = _section(data, "crosscheck")
-    maint_cfg = _section(data, "maintenance")
+    refresh_cfg = _section(data, "refresh") or _section(data, "maintenance")
     stream_cfg = _section(data, "streaming")
     proc_cfg = _section(data, "processing")
     backfill_cfg = _section(data, "backfill")
@@ -376,14 +376,12 @@ def load_config(
         ),
     )
 
-    maintenance_config = MaintenanceConfig(
-        day=_as_int(maint_cfg.get("day", 6), "maintenance.day", minimum=0, maximum=6),
-        hour=_as_int(
-            maint_cfg.get("hour", 4), "maintenance.hour", minimum=0, maximum=23
-        ),
+    refresh_config = RefreshConfig(
+        day=_as_int(refresh_cfg.get("day", 6), "refresh.day", minimum=0, maximum=6),
+        hour=_as_int(refresh_cfg.get("hour", 4), "refresh.hour", minimum=0, maximum=23),
         mv_refresh_hours=_as_int_list(
-            maint_cfg.get("mv_refresh_hours", [0, 6, 12, 18]),
-            "maintenance.mv_refresh_hours",
+            refresh_cfg.get("mv_refresh_hours", [0, 6, 12, 18]),
+            "refresh.mv_refresh_hours",
             minimum=0,
             maximum=23,
         ),
@@ -481,7 +479,7 @@ def load_config(
         live=live_config,
         recheck=recheck_config,
         crosscheck=crosscheck_config,
-        maintenance=maintenance_config,
+        refresh=refresh_config,
         streaming=streaming_config,
         processing=processing_config,
         backfill=backfill_config,

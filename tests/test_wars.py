@@ -78,6 +78,7 @@ def test_war_outcome_terminal_is_finished():
 
 def test_war_outcome_nonterminal_is_active():
     from datetime import datetime, timezone
+
     assert war_outcome(datetime(2030, 1, 1, tzinfo=timezone.utc)) == "active"
 
 
@@ -89,18 +90,20 @@ def test_refresh_one_war_transient_leaves_war_retryable(monkeypatch):
         yield object()
 
     monkeypatch.setattr(db, "get_connection", _conn)
-    monkeypatch.setattr(db, "set_war_refresh_after",
-                        lambda c, wid, ra: calls.__setitem__("backoff", (wid, ra)))
-    monkeypatch.setattr(db, "upsert_war",
-                        lambda *a: calls.__setitem__("terminal", a))
+    monkeypatch.setattr(
+        db,
+        "set_war_refresh_after",
+        lambda c, wid, ra: calls.__setitem__("backoff", (wid, ra)),
+    )
+    monkeypatch.setattr(db, "upsert_war", lambda *a: calls.__setitem__("terminal", a))
 
     class _Esi:
         async def fetch_war(self, wid):
             raise RuntimeError("transient 5xx exhausted")
 
     asyncio.run(wars._refresh_one_war(_Esi(), 42))
-    assert "backoff" in calls        # refresh_after pushed out -> still retryable
-    assert "terminal" not in calls   # NOT marked terminal
+    assert "backoff" in calls  # refresh_after pushed out -> still retryable
+    assert "terminal" not in calls  # NOT marked terminal
 
 
 def test_refresh_one_war_404_is_terminal(monkeypatch):
@@ -111,15 +114,21 @@ def test_refresh_one_war_404_is_terminal(monkeypatch):
         yield object()
 
     monkeypatch.setattr(db, "get_connection", _conn)
-    monkeypatch.setattr(db, "set_war_refresh_after",
-                        lambda c, wid, ra: calls.__setitem__("backoff", True))
-    monkeypatch.setattr(db, "upsert_war",
-                        lambda c, row, resolved, ra: calls.__setitem__("terminal_ra", ra))
+    monkeypatch.setattr(
+        db,
+        "set_war_refresh_after",
+        lambda c, wid, ra: calls.__setitem__("backoff", True),
+    )
+    monkeypatch.setattr(
+        db,
+        "upsert_war",
+        lambda c, row, resolved, ra: calls.__setitem__("terminal_ra", ra),
+    )
 
     class _Esi:
         async def fetch_war(self, wid):
             return None  # genuine 404
 
     asyncio.run(wars._refresh_one_war(_Esi(), 42))
-    assert calls.get("terminal_ra") is None   # refresh_after=None => terminal
+    assert calls.get("terminal_ra") is None  # refresh_after=None => terminal
     assert "backoff" not in calls

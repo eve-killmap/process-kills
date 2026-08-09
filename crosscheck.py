@@ -202,14 +202,23 @@ async def _crosscheck_date(
                         try:
                             rows = facets.collect_facets(parsed)
                             facet_start = time.monotonic()
-                            insert_facets(conn, parsed["killmail_id"], parsed["solar_system_id"],
-                                          parsed["killmail_time"], rows)
-                            metrics.facets_write_seconds.observe(time.monotonic() - facet_start)
+                            insert_facets(
+                                conn,
+                                parsed["killmail_id"],
+                                parsed["solar_system_id"],
+                                parsed["killmail_time"],
+                                rows,
+                            )
+                            metrics.facets_write_seconds.observe(
+                                time.monotonic() - facet_start
+                            )
                             for kind_name, n in facets.facet_kind_counts(rows).items():
                                 metrics.facets_written.labels(kind_name).inc(n)
                         except Exception as e:
                             metrics.errors.labels("facets").inc()
-                            logger.warning(f"Facet write failed for kill {killmail_id}: {e}")
+                            logger.warning(
+                                f"Facet write failed for kill {killmail_id}: {e}"
+                            )
             else:
                 inserted = insert_no_position_kill(
                     conn, killmail_id, killmail_hash, killmail_time

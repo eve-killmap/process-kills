@@ -22,7 +22,9 @@ CREATE INDEX IF NOT EXISTS idx_kills_time ON kills (killmail_time);
 CREATE INDEX IF NOT EXISTS idx_kills_system_time_covering
     ON kills (solar_system_id, killmail_time)
     INCLUDE (killmail_id, position_x, position_y, position_z, victim_ship_type_id);
-CREATE INDEX IF NOT EXISTS idx_kills_system_inserted ON kills (solar_system_id, inserted_time);
+CREATE INDEX IF NOT EXISTS idx_kills_system_inserted_covering
+    ON kills (solar_system_id, inserted_time)
+    INCLUDE (killmail_id, position_x, position_y, position_z, killmail_time, victim_ship_type_id);
 
 -- Attackers table to store information about attackers in each killmail
 

@@ -247,12 +247,12 @@ CREATE INDEX IF NOT EXISTS idx_facet_kill
 -- Trigram search indexes for the filter-builder autocomplete over the reference
 -- tables (id-indexed only otherwise).
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX IF NOT EXISTS idx_characters_name_trgm     ON characters   USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_corporations_name_trgm   ON corporations USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_corporations_ticker_trgm ON corporations USING gin (ticker gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_alliances_name_trgm      ON alliances    USING gin (name   gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_alliances_ticker_trgm    ON alliances    USING gin (ticker gin_trgm_ops);
-CREATE INDEX IF NOT EXISTS idx_factions_name_trgm       ON factions     USING gin (name   gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_characters_name_nospace_trgm     ON characters   USING gin (replace(name,   ' ', '') gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_corporations_name_nospace_trgm   ON corporations USING gin (replace(name,   ' ', '') gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_corporations_ticker_nospace_trgm ON corporations USING gin (replace(ticker, ' ', '') gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_alliances_name_nospace_trgm      ON alliances    USING gin (replace(name,   ' ', '') gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_alliances_ticker_nospace_trgm    ON alliances    USING gin (replace(ticker, ' ', '') gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_factions_name_nospace_trgm       ON factions     USING gin (replace(name,   ' ', '') gin_trgm_ops);
 
 -- Source for attacker weapon autocomplete searching
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_weapon_search AS

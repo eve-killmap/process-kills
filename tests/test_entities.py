@@ -60,7 +60,7 @@ def test_is_empty():
     assert not EntityIds(frozenset({1}), frozenset(), frozenset()).is_empty
 
 
-from entities import character_rows, group_rows
+from entities import character_rows, alliance_rows, parse_alliance
 
 
 def test_character_rows_tombstones_missing():
@@ -68,17 +68,24 @@ def test_character_rows_tombstones_missing():
     assert rows == {1: "Alice", 2: "Bob", 3: None}
 
 
-def test_group_rows_tombstones_missing_and_none():
-    info = {10: ("CorpA", "AAA"), 11: None}
-    rows = {r[0]: (r[1], r[2]) for r in group_rows({10, 11, 12}, info)}
-    assert rows[10] == ("CorpA", "AAA")
-    assert rows[11] == (None, None)
-    assert rows[12] == (None, None)
+def test_parse_alliance_extracts_date_founded():
+    assert parse_alliance(
+        {"name": "A", "ticker": "AA", "date_founded": "2010-01-01T00:00:00Z"}
+    ) == ("A", "AA", "2010-01-01T00:00:00Z")
+
+
+def test_alliance_rows_tombstones_missing_and_none():
+    info = {10: {"name": "AllyA", "ticker": "AAA", "date_founded": "2010-01-01T00:00:00Z"}, 11: None}
+    rows = {r[0]: r[1:] for r in alliance_rows({10, 11, 12}, info)}
+    assert rows[10] == ("AllyA", "AAA", "2010-01-01T00:00:00Z")
+    assert rows[11] == (None, None, None)
+    assert rows[12] == (None, None, None)
 
 
 import asyncio
 from datetime import datetime, timezone
 
+import corporations
 import db
 import entities
 from entities import EntityIds
@@ -171,51 +178,48 @@ def test_ensure_kill_entities_noop_when_all_fresh(monkeypatch):
     assert called == []
 
 
-def test_resolve_and_store_counts_each_corp_once(monkeypatch):
-    from prometheus_client import REGISTRY
+def test_resolve_and_store_delegates_corps_to_refresh(monkeypatch):
+    seen = {}
 
-    def val(outcome):
-        return (
-            REGISTRY.get_sample_value(
-                "eve_killmap_entities_resolved_total",
-                {"kind": "corporation", "outcome": outcome},
-            )
-            or 0.0
-        )
+    async def fake_refresh(conn, esi, ids, concurrency):
+        seen["ids"] = list(ids)
+
+    monkeypatch.setattr(corporations, "refresh_corporations", fake_refresh)
+    monkeypatch.setattr(db, "upsert_alliances", lambda c, r: None)
+    monkeypatch.setattr(db, "upsert_characters", lambda c, r: None)
 
     class _Esi:
         async def resolve_names(self, ids):
-            return {}
-
-        async def get_corporation(self, cid):
-            if cid == 1:
-                return ("CorpOne", "ONE")  # resolved
-            if cid == 2:
-                return None  # not_found (404)
-            raise RuntimeError("boom")  # error (cid == 3)
+            return {}, set()
 
         async def get_alliance(self, aid):
             return None
 
-    upserted = []
-    monkeypatch.setattr(
-        db, "upsert_corporations", lambda conn, rows: upserted.extend(rows)
-    )
-    monkeypatch.setattr(db, "upsert_alliances", lambda conn, rows: None)
-    monkeypatch.setattr(db, "upsert_characters", lambda conn, rows: None)
-
-    before = {o: val(o) for o in ("resolved", "not_found", "error")}
     unfresh = EntityIds(frozenset(), frozenset({1, 2, 3}), frozenset())
     asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))
-    after = {o: val(o) for o in ("resolved", "not_found", "error")}
+    assert set(seen["ids"]) == {1, 2, 3}
 
-    assert after["resolved"] - before["resolved"] == 1
-    assert after["not_found"] - before["not_found"] == 1
-    assert after["error"] - before["error"] == 1
 
-    upserted_ids = {r[0] for r in upserted}
-    assert 3 not in upserted_ids  # errored corp NOT tombstoned (will retry)
-    assert upserted_ids == {1, 2}  # only the resolved + genuine-404 ids written
+def test_resolve_and_store_captures_alliance_date_founded(monkeypatch):
+    rows = []
+    monkeypatch.setattr(db, "upsert_alliances", lambda c, r: rows.extend(r))
+    monkeypatch.setattr(db, "upsert_characters", lambda c, r: None)
+
+    async def fake_refresh(*a, **k):
+        pass
+
+    monkeypatch.setattr(corporations, "refresh_corporations", fake_refresh)
+
+    class _Esi:
+        async def resolve_names(self, ids):
+            return {}, set()
+
+        async def get_alliance(self, aid):
+            return {"name": "AllianceOne", "ticker": "AO", "date_founded": "2010-01-01T00:00:00Z"}
+
+    unfresh = EntityIds(frozenset(), frozenset(), frozenset({99000001}))
+    asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))
+    assert rows == [(99000001, "AllianceOne", "AO", "2010-01-01T00:00:00Z")]
 
 
 def test_resolve_and_store_does_not_tombstone_failed_characters(monkeypatch):

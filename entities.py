@@ -10,8 +10,11 @@ Design: docs/superpowers/specs/2026-07-17-entity-enrichment-precompute-design.md
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
+import corporations
 from schema import ParsedKill
 
 logger = logging.getLogger(__name__)
@@ -64,17 +67,25 @@ def character_rows(
     return [(cid, names.get(cid)) for cid in requested]
 
 
-def group_rows(
-    requested: set[int], info: dict[int, tuple[str, str] | None]
-) -> list[tuple[int, str | None, str | None]]:
-    """One (id, name, ticker) row per requested id; (None, None) if unresolved."""
-    rows: list[tuple[int, str | None, str | None]] = []
-    for gid in requested:
-        entry = info.get(gid)
-        if entry is None:
-            rows.append((gid, None, None))
+def parse_alliance(
+    data: Mapping[str, Any],
+) -> tuple[str | None, str | None, str | None]:
+    """ESI alliance JSON -> (name, ticker, date_founded)."""
+    return data.get("name"), data.get("ticker"), data.get("date_founded")
+
+
+def alliance_rows(
+    requested: set[int], info: dict[int, dict | None]
+) -> list[tuple[int, str | None, str | None, str | None]]:
+    """One (id, name, ticker, date_founded) row per id; all-None if unresolved."""
+    rows: list[tuple[int, str | None, str | None, str | None]] = []
+    for aid in requested:
+        data = info.get(aid)
+        if data is None:
+            rows.append((aid, None, None, None))
         else:
-            rows.append((gid, entry[0], entry[1]))
+            name, ticker, date_founded = parse_alliance(data)
+            rows.append((aid, name, ticker, date_founded))
     return rows
 
 
@@ -128,18 +139,9 @@ async def resolve_and_store(
                 return gid, None, True
 
     if unfresh.corporations:
-        start = time.monotonic()
-        results = await asyncio.gather(
-            *[one("corporation", esi.get_corporation, c) for c in unfresh.corporations]
+        await corporations.refresh_corporations(
+            conn, esi, list(unfresh.corporations), max_concurrency
         )
-        errored = {gid for gid, _val, err in results if err}
-        info = {gid: val for gid, val, err in results if not err}
-        resolved_ids = set(unfresh.corporations) - errored
-        db.upsert_corporations(conn, group_rows(resolved_ids, info))
-        metrics.entity_resolve_seconds.labels("corporation").observe(
-            time.monotonic() - start
-        )
-        _count_group_outcomes("corporation", info, backfill)
 
     if unfresh.alliances:
         start = time.monotonic()
@@ -149,7 +151,7 @@ async def resolve_and_store(
         errored = {gid for gid, _val, err in results if err}
         info = {gid: val for gid, val, err in results if not err}
         resolved_ids = set(unfresh.alliances) - errored
-        db.upsert_alliances(conn, group_rows(resolved_ids, info))
+        db.upsert_alliances(conn, alliance_rows(resolved_ids, info))
         metrics.entity_resolve_seconds.labels("alliance").observe(
             time.monotonic() - start
         )

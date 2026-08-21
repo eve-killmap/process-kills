@@ -363,8 +363,8 @@ class ESIClient:
 
     async def _get_named_entity(
         self, url: str, kind: str, entity_id: int
-    ) -> tuple[str, str] | None:
-        """GET an entity returning {name, ticker}. None ONLY on 404 (genuine
+    ) -> dict | None:
+        """GET an entity, returning the full ESI JSON. None ONLY on 404 (genuine
         absent -> tombstone). Raises on transient failure (5xx / network / other
         non-200) so the caller retries instead of tombstoning. Not rate limited."""
         assert self._session is not None
@@ -376,14 +376,13 @@ class ESIClient:
                 raise RuntimeError(
                     f"{kind} {entity_id} returned {resp.status}: {text[:200]}"
                 )
-            data = await resp.json()
-        return data["name"], data["ticker"]
+            return await resp.json()
 
-    async def get_corporation(self, corporation_id: int) -> tuple[str, str] | None:
+    async def get_corporation(self, corporation_id: int) -> dict | None:
         url = config.sources.esi_corporation_url.format(corporation_id=corporation_id)
         return await self._get_named_entity(url, "corporation", corporation_id)
 
-    async def get_alliance(self, alliance_id: int) -> tuple[str, str] | None:
+    async def get_alliance(self, alliance_id: int) -> dict | None:
         url = config.sources.esi_alliance_url.format(alliance_id=alliance_id)
         return await self._get_named_entity(url, "alliance", alliance_id)
 

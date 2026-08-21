@@ -77,10 +77,11 @@ def test_resolve_names_absent_id_from_200_is_not_failed():
     assert failed == set()  # omitted id is NOT failed (tombstones instead)
 
 
-def test_get_corporation_success_returns_name_and_ticker():
-    resp = _FakeResp(200, {"name": "Test Corp", "ticker": "TEST"})
+def test_get_corporation_success_returns_full_record():
+    payload = {"name": "Test Corp", "ticker": "TEST", "member_count": 5, "state": "active"}
+    resp = _FakeResp(200, payload)
     client = _client_with_session(_FakeGetSession(resp))
-    assert asyncio.run(client.get_corporation(98000001)) == ("Test Corp", "TEST")
+    assert asyncio.run(client.get_corporation(98000001)) == payload
 
 
 def test_get_corporation_404_returns_none():

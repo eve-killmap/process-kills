@@ -52,3 +52,56 @@ def compute_corp_refresh_after(
     if not active:
         return None
     return now + ACTIVE_REFRESH_INTERVAL + jitter
+
+
+async def refresh_corporations(
+    conn, esi, corp_ids: Iterable[int], concurrency: int
+) -> None:
+    """Fetch + parse + upsert + reschedule a batch of corp ids. Never raises per
+    corp. Shared by inline ingestion, the scheduler, and the local backfill."""
+    corp_ids = list(corp_ids)
+    if not corp_ids:
+        return
+    sem = asyncio.Semaphore(concurrency)
+
+    async def one(cid: int):
+        async with sem:
+            try:
+                data = await esi.get_corporation(cid)
+            except Exception:
+                return cid, "error", None
+            if data is None:
+                return cid, "not_found", None
+            return cid, "ok", parse_corporation(data)
+
+    start = time.monotonic()
+    results = await asyncio.gather(*[one(c) for c in corp_ids])
+    now = datetime.now(timezone.utc)
+    ok_rows = []
+    for cid, outcome, parsed in results:
+        if outcome == "ok":
+            active = parsed["active"]
+            jitter = timedelta(seconds=random.uniform(0, CORP_REFRESH_JITTER_SECONDS))
+            refresh_after = compute_corp_refresh_after(active, now, jitter)
+            ok_rows.append(
+                (
+                    cid,
+                    parsed["name"],
+                    parsed["ticker"],
+                    parsed["alliance_id"],
+                    parsed["date_founded"],
+                    parsed["member_count"],
+                    active,
+                    refresh_after,
+                )
+            )
+            metrics.corporations_refreshed.labels("active" if active else "closed").inc()
+        elif outcome == "not_found":
+            db.mark_corporation_closed(conn, cid)
+            metrics.corporations_refreshed.labels("not_found").inc()
+        else:  # transient error -> retry soon, leave data untouched
+            db.set_corporation_refresh_after(conn, cid, now + CORP_RETRY_BACKOFF)
+            metrics.corporations_refreshed.labels("error").inc()
+    if ok_rows:
+        db.upsert_corporations(conn, ok_rows)
+    metrics.corporation_refresh_seconds.observe(time.monotonic() - start)

@@ -460,16 +460,26 @@ def upsert_characters(conn, rows):
 
 
 def upsert_corporations(conn, rows):
+    # rows: (corporation_id, name, ticker, alliance_id, date_founded,
+    #        member_count, active, refresh_after)
     if not rows:
         return
     with get_cursor(conn) as cursor:
         execute_values(
             cursor,
             """
-            INSERT INTO corporations (corporation_id, name, ticker) VALUES %s
+            INSERT INTO corporations (
+                corporation_id, name, ticker, alliance_id,
+                date_founded, member_count, active, refresh_after
+            ) VALUES %s
             ON CONFLICT (corporation_id) DO UPDATE SET
                 name = COALESCE(EXCLUDED.name, corporations.name),
                 ticker = COALESCE(EXCLUDED.ticker, corporations.ticker),
+                alliance_id = EXCLUDED.alliance_id,
+                date_founded = COALESCE(EXCLUDED.date_founded, corporations.date_founded),
+                member_count = EXCLUDED.member_count,
+                active = EXCLUDED.active,
+                refresh_after = EXCLUDED.refresh_after,
                 resolved_at = NOW()
             """,
             rows,
@@ -477,17 +487,39 @@ def upsert_corporations(conn, rows):
     conn.commit()
 
 
+def mark_corporation_closed(conn, corporation_id):
+    """404/deleted: freeze terminal (never refresh again), exclude from open calc."""
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE corporations SET active = FALSE, refresh_after = NULL, "
+            "resolved_at = NOW() WHERE corporation_id = %s",
+            (corporation_id,),
+        )
+    conn.commit()
+
+
+def set_corporation_refresh_after(conn, corporation_id, refresh_after):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE corporations SET refresh_after = %s WHERE corporation_id = %s",
+            (refresh_after, corporation_id),
+        )
+    conn.commit()
+
+
 def upsert_alliances(conn, rows):
+    # rows: (alliance_id, name, ticker, date_founded)
     if not rows:
         return
     with get_cursor(conn) as cursor:
         execute_values(
             cursor,
             """
-            INSERT INTO alliances (alliance_id, name, ticker) VALUES %s
+            INSERT INTO alliances (alliance_id, name, ticker, date_founded) VALUES %s
             ON CONFLICT (alliance_id) DO UPDATE SET
                 name = COALESCE(EXCLUDED.name, alliances.name),
                 ticker = COALESCE(EXCLUDED.ticker, alliances.ticker),
+                date_founded = COALESCE(EXCLUDED.date_founded, alliances.date_founded),
                 resolved_at = NOW()
             """,
             rows,

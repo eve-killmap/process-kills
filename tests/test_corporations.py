@@ -116,6 +116,16 @@ def test_refresh_transient_error_sets_backoff_no_upsert(monkeypatch):
     assert [cid for cid, _ra in calls["backoff"]] == [4]
 
 
+def test_refresh_non_dict_body_is_error_not_raise(monkeypatch):
+    class _BadEsi:
+        async def get_corporation(self, cid):
+            return []  # 200 body that isn't a dict
+
+    calls = _run_refresh(monkeypatch, _BadEsi(), [9])
+    assert calls["upsert"] == []
+    assert [cid for cid, _ra in calls["backoff"]] == [9]
+
+
 def test_refresh_due_batch_refreshes_due_ids(monkeypatch):
     seen = {}
     monkeypatch.setattr(corporations.db, "get_connection", _fake_conn)

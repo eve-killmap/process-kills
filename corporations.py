@@ -68,11 +68,11 @@ async def refresh_corporations(
         async with sem:
             try:
                 data = await esi.get_corporation(cid)
+                if data is None:
+                    return cid, "not_found", None
+                return cid, "ok", parse_corporation(data)
             except Exception:
                 return cid, "error", None
-            if data is None:
-                return cid, "not_found", None
-            return cid, "ok", parse_corporation(data)
 
     start = time.monotonic()
     results = await asyncio.gather(*[one(c) for c in corp_ids])

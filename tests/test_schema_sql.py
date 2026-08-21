@@ -74,6 +74,11 @@ def test_corporations_refresh_cursor_present():
     # exactly one immutable partial predicate, like idx_wars_refresh
     assert "ON corporations (refresh_after)" in _SCHEMA_NORM
     assert "WHERE refresh_after IS NOT NULL" in SCHEMA
+    # pin the predicate to this specific index (not just present somewhere in SCHEMA)
+    assert re.search(
+        r"idx_corporations_refresh\s+ON corporations \(refresh_after\)\s+WHERE refresh_after IS NOT NULL",
+        SCHEMA,
+    )
 
 
 def test_corporation_metadata_indexes_present():
@@ -81,6 +86,11 @@ def test_corporation_metadata_indexes_present():
     # _SCHEMA_NORM preserves newlines) — matches the idx_facet_kill convention.
     assert "idx_corporations_alliance_id" in SCHEMA
     assert "ON corporations (alliance_id)" in _SCHEMA_NORM
+    # pin the predicate to this specific index (not just present somewhere in SCHEMA)
+    assert re.search(
+        r"idx_corporations_alliance_id\s+ON corporations \(alliance_id\)\s+WHERE alliance_id IS NOT NULL",
+        SCHEMA,
+    )
     assert "idx_corporations_date_founded" in SCHEMA
     assert "ON corporations (date_founded DESC NULLS LAST)" in _SCHEMA_NORM
     assert "idx_alliances_date_founded" in SCHEMA

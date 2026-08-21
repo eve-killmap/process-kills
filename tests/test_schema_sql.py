@@ -93,3 +93,4 @@ def test_mv_alliance_status_present():
     assert "COALESCE(SUM(member_count), 0) > 0 AS is_open" in _SCHEMA_NORM
     assert "idx_mv_alliance_status_alliance" in SCHEMA
     assert "ON mv_alliance_status (alliance_id)" in _SCHEMA_NORM
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_status_alliance" in SCHEMA

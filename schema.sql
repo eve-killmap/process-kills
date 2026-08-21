@@ -178,14 +178,20 @@ CREATE TABLE IF NOT EXISTS corporations (
     corporation_id INTEGER PRIMARY KEY,
     resolved_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     name           TEXT,
-    ticker         TEXT
+    ticker         TEXT,
+    alliance_id    INTEGER,
+    date_founded   TIMESTAMPTZ,
+    member_count   INTEGER,
+    active         BOOLEAN,
+    refresh_after TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS alliances (
-    alliance_id INTEGER PRIMARY KEY,
-    resolved_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    name        TEXT,
-    ticker      TEXT
+    alliance_id  INTEGER PRIMARY KEY,
+    resolved_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    name         TEXT,
+    ticker       TEXT,
+    date_founded TIMESTAMPTZ
 );
 
 CREATE TABLE IF NOT EXISTS factions (
@@ -218,6 +224,21 @@ CREATE TABLE IF NOT EXISTS wars (
 -- Only non-terminal wars are indexed (immutable predicate, no NOW()).
 CREATE INDEX IF NOT EXISTS idx_wars_refresh ON wars (refresh_after)
     WHERE refresh_after IS NOT NULL;
+
+-- Corporation rolling-refresh cursor (mirrors wars.refresh_after; NULL = terminal:
+-- a closed/deleted corp, never refreshed again). Immutable partial predicate.
+CREATE INDEX IF NOT EXISTS idx_corporations_refresh ON corporations (refresh_after)
+    WHERE refresh_after IS NOT NULL;
+
+-- Backend "corps in alliance X" + the mv_alliance_status aggregate's filter.
+CREATE INDEX IF NOT EXISTS idx_corporations_alliance_id ON corporations (alliance_id)
+    WHERE alliance_id IS NOT NULL;
+
+-- Backend autocomplete "newest first" ordering.
+CREATE INDEX IF NOT EXISTS idx_corporations_date_founded
+    ON corporations (date_founded DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS idx_alliances_date_founded
+    ON alliances (date_founded DESC NULLS LAST);
 
 CREATE TABLE IF NOT EXISTS entity_resolve_backlog (
     killmail_id BIGINT PRIMARY KEY,
@@ -271,3 +292,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_weapon_search_type_id
 -- Trigram index for the ILIKE name autocomplete (headroom; the weapon set is small).
 CREATE INDEX IF NOT EXISTS idx_mv_weapon_search_name_trgm
     ON mv_weapon_search USING gin (name gin_trgm_ops);
+
+-- Alliance open/closed status, derived from corporations. Scans active corps only,
+-- so its input shrinks as corps close; alliances with no active member corps simply
+-- don't appear (the backend COALESCEs the absence to closed).
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_status AS
+SELECT
+    alliance_id,
+    COALESCE(SUM(member_count), 0) > 0 AS is_open
+FROM corporations
+WHERE alliance_id IS NOT NULL AND active IS TRUE
+GROUP BY alliance_id;
+
+-- Unique index required for REFRESH MATERIALIZED VIEW CONCURRENTLY + point reads.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_status_alliance
+    ON mv_alliance_status (alliance_id);

@@ -51,13 +51,45 @@ def test_kill_facets_table_and_index_present():
 
 def test_pg_trgm_search_indexes_present():
     assert "CREATE EXTENSION IF NOT EXISTS pg_trgm" in SCHEMA
-    # each trigram index name tied to its exact table + column + gin_trgm_ops
     for name, table, col in [
-        ("idx_characters_name_trgm", "characters", "name"),
-        ("idx_corporations_name_trgm", "corporations", "name"),
-        ("idx_corporations_ticker_trgm", "corporations", "ticker"),
-        ("idx_alliances_name_trgm", "alliances", "name"),
-        ("idx_alliances_ticker_trgm", "alliances", "ticker"),
-        ("idx_factions_name_trgm", "factions", "name"),
+        ("idx_characters_name_nospace_trgm", "characters", "name"),
+        ("idx_corporations_name_nospace_trgm", "corporations", "name"),
+        ("idx_corporations_ticker_nospace_trgm", "corporations", "ticker"),
+        ("idx_alliances_name_nospace_trgm", "alliances", "name"),
+        ("idx_alliances_ticker_nospace_trgm", "alliances", "ticker"),
+        ("idx_factions_name_nospace_trgm", "factions", "name"),
     ]:
-        assert f"{name} ON {table} USING gin ({col} gin_trgm_ops)" in _SCHEMA_NORM
+        assert (
+            f"{name} ON {table} USING gin (replace({col}, ' ', '') gin_trgm_ops)"
+            in _SCHEMA_NORM
+        )
+
+
+def test_corporations_refresh_cursor_present():
+    start = SCHEMA.index("CREATE TABLE IF NOT EXISTS corporations")
+    end = SCHEMA.index("CREATE TABLE IF NOT EXISTS alliances")
+    corp_block = SCHEMA[start:end]
+    assert "refresh_after TIMESTAMPTZ" in corp_block
+    assert "idx_corporations_refresh" in SCHEMA
+    # exactly one immutable partial predicate, like idx_wars_refresh
+    assert "ON corporations (refresh_after)" in _SCHEMA_NORM
+    assert "WHERE refresh_after IS NOT NULL" in SCHEMA
+
+
+def test_corporation_metadata_indexes_present():
+    # Name and ON-clause asserted separately (indexes may span two lines, and
+    # _SCHEMA_NORM preserves newlines) — matches the idx_facet_kill convention.
+    assert "idx_corporations_alliance_id" in SCHEMA
+    assert "ON corporations (alliance_id)" in _SCHEMA_NORM
+    assert "idx_corporations_date_founded" in SCHEMA
+    assert "ON corporations (date_founded DESC NULLS LAST)" in _SCHEMA_NORM
+    assert "idx_alliances_date_founded" in SCHEMA
+    assert "ON alliances (date_founded DESC NULLS LAST)" in _SCHEMA_NORM
+
+
+def test_mv_alliance_status_present():
+    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_status" in SCHEMA
+    assert "WHERE alliance_id IS NOT NULL AND active IS TRUE" in _SCHEMA_NORM
+    assert "COALESCE(SUM(member_count), 0) > 0 AS is_open" in _SCHEMA_NORM
+    assert "idx_mv_alliance_status_alliance" in SCHEMA
+    assert "ON mv_alliance_status (alliance_id)" in _SCHEMA_NORM

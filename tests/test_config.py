@@ -312,3 +312,29 @@ def test_facets_disabled_by_default_and_toggleable(tmp_path):
     yaml_path = write_yaml(tmp_path, "facets:\n  enabled: true\n")
     cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.facets.enabled is True
+
+
+def test_corporations_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.corporations.enabled is True
+    assert cfg.corporations.interval == 60
+    assert cfg.corporations.batch_size == 250
+    assert cfg.corporations.max_concurrency == 10
+
+
+def test_corporations_yaml_overrides(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path,
+        "corporations:\n  enabled: false\n  interval: 30\n  batch_size: 500\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.corporations.enabled is False
+    assert cfg.corporations.interval == 30
+    assert cfg.corporations.batch_size == 500
+    assert cfg.corporations.max_concurrency == 10  # untouched default
+
+
+def test_corporations_interval_min_validated(tmp_path):
+    yaml_path = write_yaml(tmp_path, "corporations:\n  interval: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

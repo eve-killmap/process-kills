@@ -171,6 +171,14 @@ class WarsConfig:
 
 
 @dataclass(frozen=True)
+class CorporationsConfig:
+    enabled: bool
+    interval: int
+    batch_size: int
+    max_concurrency: int
+
+
+@dataclass(frozen=True)
 class FactionsConfig:
     refresh_days: int
 
@@ -202,6 +210,7 @@ class Config:
     metrics: MetricsConfig
     entities: EntitiesConfig
     wars: WarsConfig
+    corporations: CorporationsConfig
     factions: FactionsConfig
     facets: FacetsConfig
     user_agent: str
@@ -296,6 +305,7 @@ def load_config(
     metrics_cfg = _section(data, "metrics")
     entities_cfg = _section(data, "entities")
     wars_cfg = _section(data, "wars")
+    corporations_cfg = _section(data, "corporations")
     factions_cfg = _section(data, "factions")
     facets_cfg = _section(data, "facets")
 
@@ -458,6 +468,23 @@ def load_config(
         ),
     )
 
+    corporations_config = CorporationsConfig(
+        enabled=bool(corporations_cfg.get("enabled", True)),
+        interval=_as_int(
+            corporations_cfg.get("interval", 60), "corporations.interval", minimum=1
+        ),
+        batch_size=_as_int(
+            corporations_cfg.get("batch_size", 250),
+            "corporations.batch_size",
+            minimum=1,
+        ),
+        max_concurrency=_as_int(
+            corporations_cfg.get("max_concurrency", 10),
+            "corporations.max_concurrency",
+            minimum=1,
+        ),
+    )
+
     factions_config = FactionsConfig(
         refresh_days=_as_int(
             factions_cfg.get("refresh_days", 7), "factions.refresh_days", minimum=1
@@ -486,6 +513,7 @@ def load_config(
         metrics=metrics_config,
         entities=entities_config,
         wars=wars_config,
+        corporations=corporations_config,
         factions=factions_config,
         facets=facets_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,

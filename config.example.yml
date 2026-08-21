@@ -101,6 +101,12 @@ wars:
   interval: 60             # seconds between refresh cycles
   batch_size: 100          # wars per cycle (the ESI token bucket is the real ceiling)
 
+corporations:
+  enabled: true
+  interval: 60          # scheduler tick, seconds
+  batch_size: 250       # corps refreshed per tick (~24h cycle at the active-corp count)
+  max_concurrency: 10   # concurrent ESI corp GETs per tick
+
 # Faction reference data (small, near-static; fetched whole).
 factions:
   refresh_days: 7

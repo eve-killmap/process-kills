@@ -97,16 +97,21 @@ def test_corporation_metadata_indexes_present():
     assert "ON alliances (date_founded DESC NULLS LAST)" in _SCHEMA_NORM
 
 
-def test_mv_alliance_status_present():
-    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_status" in SCHEMA
-    assert "COALESCE(SUM(member_count), 0) > 0 AS is_open" in _SCHEMA_NORM
-    # is_open derives from member_count alone now — the active column/filter is gone.
+def test_mv_alliance_member_count_present():
+    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_member_count" in SCHEMA
+    # stores the raw SUM(member_count) per alliance; open/closed is derived in the
+    # backend (member_count > 0), not stored. The active column/filter is gone.
+    assert "COALESCE(SUM(member_count), 0) AS member_count" in _SCHEMA_NORM
     assert "active IS TRUE" not in SCHEMA
+    assert "AS is_open" not in SCHEMA
     # pin the MV's FROM/WHERE/GROUP BY (no active filter)
     assert re.search(
         r"FROM corporations\s+WHERE alliance_id IS NOT NULL\s+GROUP BY alliance_id",
         SCHEMA,
     )
-    assert "idx_mv_alliance_status_alliance" in SCHEMA
-    assert "ON mv_alliance_status (alliance_id)" in _SCHEMA_NORM
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_status_alliance" in SCHEMA
+    assert "idx_mv_alliance_member_count_alliance" in SCHEMA
+    assert "ON mv_alliance_member_count (alliance_id)" in _SCHEMA_NORM
+    assert (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_member_count_alliance"
+        in SCHEMA
+    )

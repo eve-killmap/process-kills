@@ -35,7 +35,7 @@ _FAST_VIEWS = [
     "mv_kills_per_system_30d",
     "mv_kills_per_system_6m",
     "mv_kills_per_system_1y",
-    "mv_alliance_status",
+    "mv_alliance_member_count",
 ]
 
 _SLOW_VIEWS = [

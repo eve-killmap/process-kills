@@ -229,7 +229,7 @@ CREATE INDEX IF NOT EXISTS idx_wars_refresh ON wars (refresh_after)
 CREATE INDEX IF NOT EXISTS idx_corporations_refresh ON corporations (refresh_after)
     WHERE refresh_after IS NOT NULL;
 
--- Backend "corps in alliance X" + the mv_alliance_status aggregate's filter.
+-- Backend "corps in alliance X" + the mv_alliance_member_count aggregate's filter.
 CREATE INDEX IF NOT EXISTS idx_corporations_alliance_id ON corporations (alliance_id)
     WHERE alliance_id IS NOT NULL;
 
@@ -292,18 +292,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_weapon_search_type_id
 CREATE INDEX IF NOT EXISTS idx_mv_weapon_search_name_trgm
     ON mv_weapon_search USING gin (name gin_trgm_ops);
 
--- Alliance open/closed status, derived from corporations: "open" iff any member
--- corp has members (member_count > 0). Corps with 0/NULL members contribute 0 to
--- the sum, so an alliance with none appears closed (the backend COALESCEs an absent
--- row to closed).
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_status AS
+-- Alliance member totals, derived from corporations: SUM(member_count) per alliance.
+-- The backend derives open/closed as (member_count > 0); storing the raw total keeps
+-- that threshold in the query and makes the aggregate independently useful. Alliances
+-- with no member corps don't appear (the backend COALESCEs an absent row to 0/closed).
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_member_count AS
 SELECT
     alliance_id,
-    COALESCE(SUM(member_count), 0) > 0 AS is_open
+    COALESCE(SUM(member_count), 0) AS member_count
 FROM corporations
 WHERE alliance_id IS NOT NULL
 GROUP BY alliance_id;
 
 -- Unique index required for REFRESH MATERIALIZED VIEW CONCURRENTLY + point reads.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_status_alliance
-    ON mv_alliance_status (alliance_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_member_count_alliance
+    ON mv_alliance_member_count (alliance_id);

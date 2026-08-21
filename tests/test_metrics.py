@@ -64,3 +64,15 @@ def test_facets_written_counter_is_labeled():
     before = _val("eve_killmap_facets_written_total", labels) or 0.0
     metrics.facets_written.labels("character").inc(3)
     assert _val("eve_killmap_facets_written_total", labels) == before + 3
+
+
+def test_corporations_refreshed_counter_is_labeled():
+    labels = {"outcome": "active"}
+    before = _val("eve_killmap_corporations_refreshed_total", labels) or 0.0
+    metrics.corporations_refreshed.labels("active").inc()
+    assert _val("eve_killmap_corporations_refreshed_total", labels) == before + 1
+
+
+def test_corporations_pending_gauge_can_be_set():
+    metrics.corporations_pending.set(7)
+    assert _val("eve_killmap_corporations_pending") == 7

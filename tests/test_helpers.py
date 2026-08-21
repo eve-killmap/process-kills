@@ -58,3 +58,9 @@ def test_next_fast_refresh_time_rolls_to_next_day():
     assert _next_fast_refresh_time(now) == datetime(
         2024, 1, 4, 0, 0, tzinfo=timezone.utc
     )
+
+
+def test_mv_alliance_status_in_fast_views():
+    from mv_refresh import _FAST_VIEWS
+
+    assert "mv_alliance_status" in _FAST_VIEWS

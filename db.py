@@ -635,6 +635,26 @@ def count_due_wars(conn):
         return cursor.fetchone()[0]
 
 
+def get_due_corporations(conn, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT corporation_id FROM corporations "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW() "
+            "ORDER BY refresh_after LIMIT %s",
+            (limit,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def count_due_corporations(conn):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) FROM corporations "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW()"
+        )
+        return cursor.fetchone()[0]
+
+
 def upsert_war(conn, row, resolved_at, refresh_after):
     with get_cursor(conn) as cursor:
         cursor.execute(

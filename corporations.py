@@ -105,3 +105,38 @@ async def refresh_corporations(
     if ok_rows:
         db.upsert_corporations(conn, ok_rows)
     metrics.corporation_refresh_seconds.observe(time.monotonic() - start)
+
+
+async def _refresh_due_batch(esi) -> None:
+    with db.get_connection() as conn:
+        metrics.corporations_pending.set(db.count_due_corporations(conn))
+        due = db.get_due_corporations(conn, config.corporations.batch_size)
+    if not due:
+        return
+    with db.get_connection() as conn:
+        await refresh_corporations(conn, esi, due, config.corporations.max_concurrency)
+
+
+async def corporation_refresh_scheduler(esi, shutdown_event) -> None:
+    if not config.corporations.enabled:
+        logger.info("Corporation refresh scheduler disabled (corporations.enabled=false).")
+        return
+    logger.info(
+        "Corporation refresh scheduler started (every %ds, batch %d).",
+        config.corporations.interval,
+        config.corporations.batch_size,
+    )
+    while not shutdown_event.is_set():
+        try:
+            await asyncio.wait_for(
+                shutdown_event.wait(), timeout=config.corporations.interval
+            )
+            break
+        except asyncio.TimeoutError:
+            pass
+        try:
+            await _refresh_due_batch(esi)
+        except Exception as e:
+            metrics.errors.labels("corporations").inc()
+            logger.error("Corporation refresh scheduler error: %s", e, exc_info=True)
+    logger.info("Corporation refresh scheduler stopped.")

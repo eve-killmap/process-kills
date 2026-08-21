@@ -114,3 +114,50 @@ def test_refresh_transient_error_sets_backoff_no_upsert(monkeypatch):
     calls = _run_refresh(monkeypatch, _Esi({4: "error"}), [4])
     assert calls["upsert"] == []
     assert [cid for cid, _ra in calls["backoff"]] == [4]
+
+
+def test_refresh_due_batch_refreshes_due_ids(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(corporations.db, "get_connection", _fake_conn)
+    monkeypatch.setattr(corporations.db, "count_due_corporations", lambda c: 2)
+    monkeypatch.setattr(corporations.db, "get_due_corporations", lambda c, n: [10, 11])
+
+    async def fake_refresh(conn, esi, ids, concurrency):
+        seen["ids"] = list(ids)
+
+    monkeypatch.setattr(corporations, "refresh_corporations", fake_refresh)
+    asyncio.run(corporations._refresh_due_batch(object()))
+    assert seen["ids"] == [10, 11]
+
+
+def test_refresh_due_batch_noop_when_none_due(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(corporations.db, "get_connection", _fake_conn)
+    monkeypatch.setattr(corporations.db, "count_due_corporations", lambda c: 0)
+    monkeypatch.setattr(corporations.db, "get_due_corporations", lambda c, n: [])
+
+    async def fake_refresh(*a, **k):
+        seen["called"] = True
+
+    monkeypatch.setattr(corporations, "refresh_corporations", fake_refresh)
+    asyncio.run(corporations._refresh_due_batch(object()))
+    assert "called" not in seen
+
+
+def test_scheduler_disabled_returns_immediately(monkeypatch):
+    # config.corporations is a frozen dataclass, and so is the outer Config that
+    # holds it -> `monkeypatch.setattr(config.config, "corporations", ...)` hits
+    # the frozen instance's __setattr__ and raises FrozenInstanceError. Instead,
+    # rebuild a whole replacement Config via dataclasses.replace (construction is
+    # unaffected by frozen=True) and monkeypatch the module-level `config` name
+    # that corporations.py resolves at call time (corporations.py does
+    # `from config import config`, so this is what the scheduler sees).
+    import config as _cfg
+    from dataclasses import replace
+
+    new_config = replace(
+        _cfg.config, corporations=replace(_cfg.config.corporations, enabled=False)
+    )
+    monkeypatch.setattr(corporations, "config", new_config)
+    ev = asyncio.Event()
+    asyncio.run(corporations.corporation_refresh_scheduler(object(), ev))  # returns at once

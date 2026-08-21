@@ -16,6 +16,7 @@ from recheck import no_position_rechecking
 from mv_refresh import fast_refresh_scheduler, slow_refresh_scheduler
 import entities
 import wars
+import corporations
 import factions
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,7 @@ async def main() -> None:
         slow_refresh_scheduler(shutdown_event, redis=redis_client),
         entities.entity_backlog_scheduler(esi_client, shutdown_event),
         wars.war_scheduler(esi_client, shutdown_event),
+        corporations.corporation_refresh_scheduler(esi_client, shutdown_event),
         factions.faction_scheduler(esi_client, shutdown_event),
     ]
     if config.recheck.enabled:

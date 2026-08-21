@@ -461,7 +461,7 @@ def upsert_characters(conn, rows):
 
 def upsert_corporations(conn, rows):
     # rows: (corporation_id, name, ticker, alliance_id, date_founded,
-    #        member_count, active, refresh_after)
+    #        member_count, refresh_after)
     if not rows:
         return
     with get_cursor(conn) as cursor:
@@ -470,7 +470,7 @@ def upsert_corporations(conn, rows):
             """
             INSERT INTO corporations (
                 corporation_id, name, ticker, alliance_id,
-                date_founded, member_count, active, refresh_after
+                date_founded, member_count, refresh_after
             ) VALUES %s
             ON CONFLICT (corporation_id) DO UPDATE SET
                 name = COALESCE(EXCLUDED.name, corporations.name),
@@ -478,7 +478,6 @@ def upsert_corporations(conn, rows):
                 alliance_id = EXCLUDED.alliance_id,
                 date_founded = COALESCE(EXCLUDED.date_founded, corporations.date_founded),
                 member_count = EXCLUDED.member_count,
-                active = EXCLUDED.active,
                 refresh_after = EXCLUDED.refresh_after,
                 resolved_at = NOW()
             """,
@@ -488,11 +487,11 @@ def upsert_corporations(conn, rows):
 
 
 def mark_corporation_closed(conn, corporation_id):
-    """404/deleted: freeze terminal (never refresh again), exclude from open calc."""
+    """404/deleted: freeze terminal (refresh_after = NULL); never refresh again."""
     with get_cursor(conn) as cursor:
         cursor.execute(
-            "UPDATE corporations SET active = FALSE, refresh_after = NULL, "
-            "resolved_at = NOW() WHERE corporation_id = %s",
+            "UPDATE corporations SET refresh_after = NULL, resolved_at = NOW() "
+            "WHERE corporation_id = %s",
             (corporation_id,),
         )
     conn.commit()

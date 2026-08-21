@@ -2,7 +2,7 @@
 
 One fetch/parse/upsert/reschedule path (refresh_corporations) shared by inline
 ingestion (entities.resolve_and_store), the background scheduler, and the local
-one-off backfill. A refresh that finds active=false freezes the corp terminal
+one-off backfill. A refresh that finds member_count = 0 (or a 404) freezes the corp terminal
 (refresh_after = NULL): a closed corp's metadata is immutable forever.
 
 Design: docs/superpowers/specs/2026-08-20-corporation-alliance-metadata-design.md
@@ -32,8 +32,8 @@ CORP_REFRESH_JITTER_SECONDS = 3600  # spread a tick's batch so it doesn't re-clu
 def parse_corporation(data: Mapping[str, Any]) -> dict:
     """ESI corp JSON -> corporations column dict. Missing fields -> None.
 
-    `active` is True iff the ESI `state` field equals "active" (VERIFY the field
-    name/values against a live fetch before the mass backfill; see the spec).
+    Active/closed is derived from member_count downstream (active iff > 0); the
+    ESI corporation response has no usable state field.
     """
     return {
         "name": data.get("name"),
@@ -41,15 +41,15 @@ def parse_corporation(data: Mapping[str, Any]) -> dict:
         "alliance_id": data.get("alliance_id"),
         "date_founded": data.get("date_founded"),
         "member_count": data.get("member_count"),
-        "active": data.get("state") == "active",
     }
 
 
 def compute_corp_refresh_after(
-    active: bool, now: datetime, jitter: timedelta
+    member_count: int | None, now: datetime, jitter: timedelta
 ) -> datetime | None:
-    """Success-path reschedule: active -> now+24h(+jitter); closed -> None (terminal)."""
-    if not active:
+    """Success-path reschedule keyed on member_count: active (>0) -> now+24h(+jitter);
+    closed (0 or None) -> None (terminal, immutable)."""
+    if member_count is None or member_count <= 0:
         return None
     return now + ACTIVE_REFRESH_INTERVAL + jitter
 
@@ -80,9 +80,9 @@ async def refresh_corporations(
     ok_rows = []
     for cid, outcome, parsed in results:
         if outcome == "ok":
-            active = parsed["active"]
+            member_count = parsed["member_count"]
             jitter = timedelta(seconds=random.uniform(0, CORP_REFRESH_JITTER_SECONDS))
-            refresh_after = compute_corp_refresh_after(active, now, jitter)
+            refresh_after = compute_corp_refresh_after(member_count, now, jitter)
             ok_rows.append(
                 (
                     cid,
@@ -90,11 +90,11 @@ async def refresh_corporations(
                     parsed["ticker"],
                     parsed["alliance_id"],
                     parsed["date_founded"],
-                    parsed["member_count"],
-                    active,
+                    member_count,
                     refresh_after,
                 )
             )
+            active = member_count is not None and member_count > 0
             metrics.corporations_refreshed.labels("active" if active else "closed").inc()
         elif outcome == "not_found":
             db.mark_corporation_closed(conn, cid)

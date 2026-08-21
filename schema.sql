@@ -182,7 +182,6 @@ CREATE TABLE IF NOT EXISTS corporations (
     alliance_id    INTEGER,
     date_founded   TIMESTAMPTZ,
     member_count   INTEGER,
-    active         BOOLEAN,
     refresh_after TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -293,15 +292,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_weapon_search_type_id
 CREATE INDEX IF NOT EXISTS idx_mv_weapon_search_name_trgm
     ON mv_weapon_search USING gin (name gin_trgm_ops);
 
--- Alliance open/closed status, derived from corporations. Scans active corps only,
--- so its input shrinks as corps close; alliances with no active member corps simply
--- don't appear (the backend COALESCEs the absence to closed).
+-- Alliance open/closed status, derived from corporations: "open" iff any member
+-- corp has members (member_count > 0). Corps with 0/NULL members contribute 0 to
+-- the sum, so an alliance with none appears closed (the backend COALESCEs an absent
+-- row to closed).
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_alliance_status AS
 SELECT
     alliance_id,
     COALESCE(SUM(member_count), 0) > 0 AS is_open
 FROM corporations
-WHERE alliance_id IS NOT NULL AND active IS TRUE
+WHERE alliance_id IS NOT NULL
 GROUP BY alliance_id;
 
 -- Unique index required for REFRESH MATERIALIZED VIEW CONCURRENTLY + point reads.

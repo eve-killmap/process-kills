@@ -115,3 +115,31 @@ def test_mv_alliance_member_count_present():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_member_count_alliance"
         in SCHEMA
     )
+
+
+def test_zkb_metadata_present():
+    assert "CREATE TABLE IF NOT EXISTS zkb_metadata" in SCHEMA
+    block = _SCHEMA_NORM[_SCHEMA_NORM.index("CREATE TABLE IF NOT EXISTS zkb_metadata"):]
+    block = block[: block.index(");") + 2]
+    assert (
+        "killmail_id BIGINT PRIMARY KEY REFERENCES kills(killmail_id) ON DELETE CASCADE"
+        in block
+    )
+    for col in (
+        "solar_system_id INTEGER NOT NULL",
+        "killmail_time TIMESTAMPTZ NOT NULL",
+        "fitted_value DOUBLE PRECISION",
+        "dropped_value DOUBLE PRECISION",
+        "destroyed_value DOUBLE PRECISION",
+        "total_value DOUBLE PRECISION",
+        "total_droppable_value DOUBLE PRECISION",
+        "npc BOOLEAN",
+        "solo BOOLEAN",
+        "awox BOOLEAN",
+        "labels TEXT[]",
+    ):
+        assert col in block, col
+    assert "idx_zkb_system_time" in SCHEMA
+    assert "ON zkb_metadata (solar_system_id, killmail_time)" in _SCHEMA_NORM
+    assert "idx_zkb_labels" in SCHEMA
+    assert "ON zkb_metadata USING gin (labels)" in _SCHEMA_NORM

@@ -11,6 +11,7 @@ import entities
 import facets
 import metrics
 import stream
+import zkb
 from config import BEGIN_DATE, config
 from esi import parse_kill
 from schema import ParsedKill
@@ -20,6 +21,7 @@ from db import (
     set_live_sequence,
     insert_kill,
     insert_facets,
+    insert_zkb_metadata,
     insert_no_position_kill,
     insert_war_stub,
     increment_processed_kills,
@@ -216,6 +218,20 @@ async def _process_sequence_kill(
                         logger.warning(
                             f"Facet write failed for kill {killmail_id}: {e}"
                         )
+                zkb_obj = data.get("zkb")
+                if zkb_obj:
+                    try:
+                        insert_zkb_metadata(
+                            conn,
+                            parsed["killmail_id"],
+                            parsed["solar_system_id"],
+                            parsed["killmail_time"],
+                            zkb.parse_zkb(zkb_obj),
+                        )
+                        metrics.zkb_written.inc()
+                    except Exception as e:
+                        metrics.errors.labels("zkb").inc()
+                        logger.warning(f"zkb write failed for kill {killmail_id}: {e}")
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))

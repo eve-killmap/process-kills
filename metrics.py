@@ -221,7 +221,7 @@ errors = Counter(
     "Unhandled errors caught in a scheduler/loop, by component.",
     [
         "component"
-    ],  # live|crosscheck|recheck|mv_refresh|entities|wars|factions|entity_backlog|facets|corporations
+    ],  # live|crosscheck|recheck|mv_refresh|entities|wars|factions|entity_backlog|facets|corporations|zkb
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",
@@ -284,6 +284,14 @@ facets_write_seconds = Histogram(
     "eve_killmap_facets_write_seconds",
     "Time to write all facet rows for one kill (insert_facets round-trip). "
     "The _count series doubles as the per-kill facet-write throughput.",
+)
+
+
+# zKillboard metadata
+
+zkb_written = Counter(
+    "eve_killmap_zkb_written",
+    "zKillboard metadata rows written at ingestion.",
 )
 
 

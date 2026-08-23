@@ -798,3 +798,24 @@ def insert_facets(conn, killmail_id, solar_system_id, killmail_time, facets):
             rows,
         )
     conn.commit()
+
+
+def insert_zkb_metadata(conn, killmail_id, solar_system_id, killmail_time, zkb):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO zkb_metadata (
+                killmail_id, solar_system_id, killmail_time,
+                fitted_value, dropped_value, destroyed_value, total_value,
+                total_droppable_value, npc, solo, awox, labels
+            ) VALUES (
+                %(killmail_id)s, %(solar_system_id)s, %(killmail_time)s,
+                %(fitted_value)s, %(dropped_value)s, %(destroyed_value)s, %(total_value)s,
+                %(total_droppable_value)s, %(npc)s, %(solo)s, %(awox)s, %(labels)s
+            )
+            ON CONFLICT (killmail_id) DO NOTHING
+            """,
+            {"killmail_id": killmail_id, "solar_system_id": solar_system_id,
+             "killmail_time": killmail_time, **zkb},
+        )
+    conn.commit()

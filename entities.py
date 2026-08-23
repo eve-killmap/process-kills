@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-import corporations
 from schema import ParsedKill
 
 logger = logging.getLogger(__name__)
@@ -95,6 +94,7 @@ from datetime import datetime, timedelta, timezone
 
 import db
 import metrics
+import corporations
 from config import config
 
 

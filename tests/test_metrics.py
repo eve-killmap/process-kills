@@ -76,3 +76,9 @@ def test_corporations_refreshed_counter_is_labeled():
 def test_corporations_pending_gauge_can_be_set():
     metrics.corporations_pending.set(7)
     assert _val("eve_killmap_corporations_pending") == 7
+
+
+def test_zkb_written_counter_increments():
+    before = _val("eve_killmap_zkb_written_total") or 0.0
+    metrics.zkb_written.inc()
+    assert _val("eve_killmap_zkb_written_total") == before + 1

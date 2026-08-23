@@ -45,6 +45,26 @@ CREATE TABLE IF NOT EXISTS kill_attackers (
 
 CREATE INDEX IF NOT EXISTS idx_attackers_killmail ON kill_attackers (killmail_id);
 
+-- zKillboard per-kill metadata (values/flags/labels)
+
+CREATE TABLE IF NOT EXISTS zkb_metadata (
+    killmail_id           BIGINT PRIMARY KEY REFERENCES kills(killmail_id) ON DELETE CASCADE,
+    solar_system_id       INTEGER NOT NULL,
+    killmail_time         TIMESTAMPTZ NOT NULL,
+    fitted_value          DOUBLE PRECISION,
+    dropped_value         DOUBLE PRECISION,
+    destroyed_value       DOUBLE PRECISION,
+    total_value           DOUBLE PRECISION,
+    total_droppable_value DOUBLE PRECISION,
+    npc                   BOOLEAN,
+    solo                  BOOLEAN,
+    awox                  BOOLEAN,
+    labels                TEXT[]
+);
+
+CREATE INDEX IF NOT EXISTS idx_zkb_system_time ON zkb_metadata (solar_system_id, killmail_time);
+CREATE INDEX IF NOT EXISTS idx_zkb_labels ON zkb_metadata USING gin (labels);
+
 -- Table to store killmails without position data
 
 CREATE TABLE IF NOT EXISTS kills_no_positions (

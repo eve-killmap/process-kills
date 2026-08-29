@@ -298,11 +298,10 @@ CREATE INDEX IF NOT EXISTS idx_factions_name_nospace_trgm       ON factions     
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_ship_search AS
 SELECT t.id AS type_id, t.name
 FROM types t
-WHERE t.published
-  AND EXISTS (
-      SELECT 1 FROM kill_facets f
-      WHERE f.facet_kind = 5 AND f.facet_value = t.id
-  );
+WHERE EXISTS (
+    SELECT 1 FROM kill_facets f
+    WHERE f.facet_kind = 5 AND f.facet_value = t.id
+);
 
 -- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_ship_search_type_id
@@ -316,11 +315,10 @@ CREATE INDEX IF NOT EXISTS idx_mv_ship_search_name_trgm
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_weapon_search AS
 SELECT t.id AS type_id, t.name
 FROM types t
-WHERE t.published
-  AND EXISTS (
-      SELECT 1 FROM kill_facets f
-      WHERE f.facet_kind = 6 AND f.role = 1 AND f.facet_value = t.id
-  );
+WHERE EXISTS (
+    SELECT 1 FROM kill_facets f
+    WHERE f.facet_kind = 6 AND f.role = 1 AND f.facet_value = t.id
+);
 
 -- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_weapon_search_type_id

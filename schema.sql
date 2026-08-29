@@ -294,6 +294,24 @@ CREATE INDEX IF NOT EXISTS idx_alliances_name_nospace_trgm      ON alliances    
 CREATE INDEX IF NOT EXISTS idx_alliances_ticker_nospace_trgm    ON alliances    USING gin (replace(ticker, ' ', '') gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_factions_name_nospace_trgm       ON factions     USING gin (replace(name,   ' ', '') gin_trgm_ops);
 
+-- Source for victim/attacker ship autocomplete searching
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_ship_search AS
+SELECT t.id AS type_id, t.name
+FROM types t
+WHERE t.published
+  AND EXISTS (
+      SELECT 1 FROM kill_facets f
+      WHERE f.facet_kind = 5 AND f.facet_value = t.id
+  );
+
+-- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_ship_search_type_id
+    ON mv_ship_search (type_id);
+
+-- Trigram index for the ILIKE name autocomplete (headroom; the ship set is small).
+CREATE INDEX IF NOT EXISTS idx_mv_ship_search_name_trgm
+    ON mv_ship_search USING gin (name gin_trgm_ops);
+
 -- Source for attacker weapon autocomplete searching
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_weapon_search AS
 SELECT t.id AS type_id, t.name

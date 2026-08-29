@@ -41,6 +41,7 @@ _FAST_VIEWS = [
 _SLOW_VIEWS = [
     "mv_farthest_kill_per_system",
     "mv_weapon_search",
+    "mv_ship_search",
 ]
 
 logger = logging.getLogger(__name__)

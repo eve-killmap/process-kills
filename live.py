@@ -220,18 +220,20 @@ async def _process_sequence_kill(
                         )
                 zkb_obj = data.get("zkb")
                 if zkb_obj:
+                    parsed_zkb = zkb.parse_zkb(zkb_obj)
                     try:
                         insert_zkb_metadata(
                             conn,
                             parsed["killmail_id"],
                             parsed["solar_system_id"],
                             parsed["killmail_time"],
-                            zkb.parse_zkb(zkb_obj),
+                            parsed_zkb,
                         )
                         metrics.zkb_written.inc()
                     except Exception as e:
                         metrics.errors.labels("zkb").inc()
                         logger.warning(f"zkb write failed for kill {killmail_id}: {e}")
+                    parsed.update(parsed_zkb)
                 logger.debug(f"Live: Inserted killmail {killmail_id} (seq {sequence})")
                 metrics.kills_processed.labels("live", "inserted").inc()
                 metrics.attackers_inserted.inc(len(parsed["attackers"]))

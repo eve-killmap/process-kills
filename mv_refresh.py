@@ -34,8 +34,6 @@ _FAST_VIEWS = [
     "mv_alliance_member_count",
 ]
 
-# MV-derived cache targets the backend flushes/warms on the fast-refresh signal
-# (spec §6.1/§11). Broadcast whole; unknown targets are ignored by older backends.
 _FAST_INVALIDATION = ["system_rankings", "system_kills", "global_kills"]
 
 _SLOW_VIEWS = [

@@ -143,3 +143,22 @@ def test_zkb_metadata_present():
     assert "ON zkb_metadata (solar_system_id, killmail_time)" in _SCHEMA_NORM
     assert "idx_zkb_labels" in SCHEMA
     assert "ON zkb_metadata USING gin (labels)" in _SCHEMA_NORM
+
+
+def test_kills_per_system_daily_present():
+    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_daily" in SCHEMA
+    assert "idx_mv_kills_per_system_daily_sys_day" in SCHEMA
+    assert "idx_mv_kills_per_system_daily_day" in SCHEMA
+    # day grain: grouped on the UTC-truncated killmail_time
+    assert "(killmail_time AT TIME ZONE 'UTC')::date" in SCHEMA
+
+
+def test_interval_kill_mvs_removed():
+    for mv in (
+        "mv_kills_per_system_24h",
+        "mv_kills_per_system_7d",
+        "mv_kills_per_system_30d",
+        "mv_kills_per_system_6m",
+        "mv_kills_per_system_1y",
+    ):
+        assert mv not in SCHEMA

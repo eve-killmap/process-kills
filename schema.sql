@@ -108,70 +108,26 @@ GROUP BY solar_system_id;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_system
     ON mv_kills_per_system (solar_system_id);
 
--- Materialized view for kills per system, unordered (last 24h)
+-- Per-system daily kill rollup: the backend range-sums this over a day-aligned
+-- window (system-kills, rankings presets, global-kills histogram). Replaces the
+-- five fixed-interval MVs; one grouped scan of kills per refresh instead of five.
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_24h AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_daily AS
 SELECT
     solar_system_id,
+    (killmail_time AT TIME ZONE 'UTC')::date AS day,
     COUNT(*) AS kill_count
 FROM kills
-WHERE killmail_time >= NOW() - INTERVAL '24 hours'
-GROUP BY solar_system_id;
+GROUP BY solar_system_id, (killmail_time AT TIME ZONE 'UTC')::date;
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_24h_system
-    ON mv_kills_per_system_24h (solar_system_id);
+-- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
+-- INCLUDE (kill_count) makes the global-kills per-map id-range scan index-only.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_daily_sys_day
+    ON mv_kills_per_system_daily (solar_system_id, day) INCLUDE (kill_count);
 
--- Materialized view for kills per system, unordered (last 7d)
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_7d AS
-SELECT
-    solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
-WHERE killmail_time >= NOW() - INTERVAL '7 days'
-GROUP BY solar_system_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_7d_system
-    ON mv_kills_per_system_7d (solar_system_id);
-
--- Materialized view for kills per system, unordered (last 30d)
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_30d AS
-SELECT
-    solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
-WHERE killmail_time >= NOW() - INTERVAL '30 days'
-GROUP BY solar_system_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_30d_system
-    ON mv_kills_per_system_30d (solar_system_id);
-
--- Materialized view for kills per system, unordered (last 6m)
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_6m AS
-SELECT
-    solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
-WHERE killmail_time >= NOW() - INTERVAL '6 months'
-GROUP BY solar_system_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_6m_system
-    ON mv_kills_per_system_6m (solar_system_id);
-
--- Materialized view for kills per system, unordered (last 1y)
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_1y AS
-SELECT
-    solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
-WHERE killmail_time >= NOW() - INTERVAL '1 year'
-GROUP BY solar_system_id;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_1y_system
-    ON mv_kills_per_system_1y (solar_system_id);
+-- Day-range windows (system-kills, rankings presets) served index-only.
+CREATE INDEX IF NOT EXISTS idx_mv_kills_per_system_daily_day
+    ON mv_kills_per_system_daily (day) INCLUDE (solar_system_id, kill_count);
 
 -- Materialized view for farthest kill
 

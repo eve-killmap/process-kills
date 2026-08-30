@@ -95,7 +95,9 @@ async def refresh_corporations(
                 )
             )
             active = member_count is not None and member_count > 0
-            metrics.corporations_refreshed.labels("active" if active else "closed").inc()
+            metrics.corporations_refreshed.labels(
+                "active" if active else "closed"
+            ).inc()
         elif outcome == "not_found":
             db.mark_corporation_closed(conn, cid)
             metrics.corporations_refreshed.labels("not_found").inc()
@@ -119,7 +121,9 @@ async def _refresh_due_batch(esi) -> None:
 
 async def corporation_refresh_scheduler(esi, shutdown_event) -> None:
     if not config.corporations.enabled:
-        logger.info("Corporation refresh scheduler disabled (corporations.enabled=false).")
+        logger.info(
+            "Corporation refresh scheduler disabled (corporations.enabled=false)."
+        )
         return
     logger.info(
         "Corporation refresh scheduler started (every %ds, batch %d).",

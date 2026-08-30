@@ -75,7 +75,10 @@ def test_parse_alliance_extracts_date_founded():
 
 
 def test_alliance_rows_tombstones_missing_and_none():
-    info = {10: {"name": "AllyA", "ticker": "AAA", "date_founded": "2010-01-01T00:00:00Z"}, 11: None}
+    info = {
+        10: {"name": "AllyA", "ticker": "AAA", "date_founded": "2010-01-01T00:00:00Z"},
+        11: None,
+    }
     rows = {r[0]: r[1:] for r in alliance_rows({10, 11, 12}, info)}
     assert rows[10] == ("AllyA", "AAA", "2010-01-01T00:00:00Z")
     assert rows[11] == (None, None, None)
@@ -215,7 +218,11 @@ def test_resolve_and_store_captures_alliance_date_founded(monkeypatch):
             return {}, set()
 
         async def get_alliance(self, aid):
-            return {"name": "AllianceOne", "ticker": "AO", "date_founded": "2010-01-01T00:00:00Z"}
+            return {
+                "name": "AllianceOne",
+                "ticker": "AO",
+                "date_founded": "2010-01-01T00:00:00Z",
+            }
 
     unfresh = EntityIds(frozenset(), frozenset(), frozenset({99000001}))
     asyncio.run(entities.resolve_and_store(None, _Esi(), unfresh, max_concurrency=5))

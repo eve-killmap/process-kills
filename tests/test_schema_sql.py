@@ -119,7 +119,9 @@ def test_mv_alliance_member_count_present():
 
 def test_zkb_metadata_present():
     assert "CREATE TABLE IF NOT EXISTS zkb_metadata" in SCHEMA
-    block = _SCHEMA_NORM[_SCHEMA_NORM.index("CREATE TABLE IF NOT EXISTS zkb_metadata"):]
+    block = _SCHEMA_NORM[
+        _SCHEMA_NORM.index("CREATE TABLE IF NOT EXISTS zkb_metadata") :
+    ]
     block = block[: block.index(");") + 2]
     assert (
         "killmail_id BIGINT PRIMARY KEY REFERENCES kills(killmail_id) ON DELETE CASCADE"

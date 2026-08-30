@@ -38,14 +38,20 @@ def test_parse_corporation_missing_fields_default_to_none():
 
 def test_compute_refresh_after_active_adds_interval():
     now = datetime(2024, 6, 1, tzinfo=timezone.utc)
-    assert compute_corp_refresh_after(5, now, timedelta(0)) == now + ACTIVE_REFRESH_INTERVAL
+    assert (
+        compute_corp_refresh_after(5, now, timedelta(0))
+        == now + ACTIVE_REFRESH_INTERVAL
+    )
     assert ACTIVE_REFRESH_INTERVAL == timedelta(hours=24)
 
 
 def test_compute_refresh_after_active_includes_jitter():
     now = datetime(2024, 6, 1, tzinfo=timezone.utc)
     jitter = timedelta(minutes=30)
-    assert compute_corp_refresh_after(5, now, jitter) == now + ACTIVE_REFRESH_INTERVAL + jitter
+    assert (
+        compute_corp_refresh_after(5, now, jitter)
+        == now + ACTIVE_REFRESH_INTERVAL + jitter
+    )
 
 
 def test_compute_refresh_after_zero_members_is_terminal():
@@ -74,9 +80,17 @@ def _run_refresh(monkeypatch, esi, ids):
     calls = {"upsert": [], "closed": [], "backoff": []}
     # Patch the db module attributes (corporations.py calls db.<fn> on the same
     # module object); monkeypatch auto-restores so nothing leaks to other tests.
-    monkeypatch.setattr(db, "upsert_corporations", lambda conn, rows: calls["upsert"].extend(rows))
-    monkeypatch.setattr(db, "mark_corporation_closed", lambda conn, cid: calls["closed"].append(cid))
-    monkeypatch.setattr(db, "set_corporation_refresh_after", lambda conn, cid, ra: calls["backoff"].append((cid, ra)))
+    monkeypatch.setattr(
+        db, "upsert_corporations", lambda conn, rows: calls["upsert"].extend(rows)
+    )
+    monkeypatch.setattr(
+        db, "mark_corporation_closed", lambda conn, cid: calls["closed"].append(cid)
+    )
+    monkeypatch.setattr(
+        db,
+        "set_corporation_refresh_after",
+        lambda conn, cid, ra: calls["backoff"].append((cid, ra)),
+    )
     asyncio.run(corporations.refresh_corporations(object(), esi, ids, concurrency=5))
     return calls
 
@@ -92,8 +106,12 @@ class _Esi:
         if kind == "error":
             raise RuntimeError("transient 5xx")
         # active corp has members; "closed" corp has 0 members (terminal).
-        return {"name": f"C{cid}", "ticker": "T", "alliance_id": 1,
-                "member_count": 3 if kind == "active" else 0}
+        return {
+            "name": f"C{cid}",
+            "ticker": "T",
+            "alliance_id": 1,
+            "member_count": 3 if kind == "active" else 0,
+        }
 
 
 def test_refresh_active_upserts_with_future_refresh_after(monkeypatch):
@@ -174,4 +192,6 @@ def test_scheduler_disabled_returns_immediately(monkeypatch):
     )
     monkeypatch.setattr(corporations, "config", new_config)
     ev = asyncio.Event()
-    asyncio.run(corporations.corporation_refresh_scheduler(object(), ev))  # returns at once
+    asyncio.run(
+        corporations.corporation_refresh_scheduler(object(), ev)
+    )  # returns at once

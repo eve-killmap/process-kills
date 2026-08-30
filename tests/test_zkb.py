@@ -3,11 +3,17 @@ from zkb import parse_zkb
 
 def test_parse_zkb_maps_fields():
     z = {
-        "locationID": 50002339, "hash": "abc", "points": 1,
-        "fittedValue": 27827719.6, "droppedValue": 6038590.73,
-        "destroyedValue": 24534515.83, "totalValue": 30573106.56,
+        "locationID": 50002339,
+        "hash": "abc",
+        "points": 1,
+        "fittedValue": 27827719.6,
+        "droppedValue": 6038590.73,
+        "destroyedValue": 24534515.83,
+        "totalValue": 30573106.56,
         "totalDroppableValue": 6461356.55,
-        "npc": False, "solo": False, "awox": False,
+        "npc": False,
+        "solo": False,
+        "awox": False,
         "labels": ["tz:eu", "cat:6", "pvp", "loc:nullsec"],
     }
     assert parse_zkb(z) == {

@@ -78,7 +78,12 @@ def test_resolve_names_absent_id_from_200_is_not_failed():
 
 
 def test_get_corporation_success_returns_full_record():
-    payload = {"name": "Test Corp", "ticker": "TEST", "member_count": 5, "state": "active"}
+    payload = {
+        "name": "Test Corp",
+        "ticker": "TEST",
+        "member_count": 5,
+        "state": "active",
+    }
     resp = _FakeResp(200, payload)
     client = _client_with_session(_FakeGetSession(resp))
     assert asyncio.run(client.get_corporation(98000001)) == payload

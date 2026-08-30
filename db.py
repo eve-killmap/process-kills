@@ -815,7 +815,11 @@ def insert_zkb_metadata(conn, killmail_id, solar_system_id, killmail_time, zkb):
             )
             ON CONFLICT (killmail_id) DO NOTHING
             """,
-            {"killmail_id": killmail_id, "solar_system_id": solar_system_id,
-             "killmail_time": killmail_time, **zkb},
+            {
+                "killmail_id": killmail_id,
+                "solar_system_id": solar_system_id,
+                "killmail_time": killmail_time,
+                **zkb,
+            },
         )
     conn.commit()

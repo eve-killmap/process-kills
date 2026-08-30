@@ -64,3 +64,23 @@ def test_mv_alliance_member_count_in_fast_views():
     from mv_refresh import _FAST_VIEWS
 
     assert "mv_alliance_member_count" in _FAST_VIEWS
+
+
+def test_kills_per_system_daily_in_fast_views():
+    from mv_refresh import _FAST_VIEWS
+
+    assert "mv_kills_per_system_daily" in _FAST_VIEWS
+    for mv in (
+        "mv_kills_per_system_24h",
+        "mv_kills_per_system_7d",
+        "mv_kills_per_system_30d",
+        "mv_kills_per_system_6m",
+        "mv_kills_per_system_1y",
+    ):
+        assert mv not in _FAST_VIEWS
+
+
+def test_fast_invalidation_targets():
+    from mv_refresh import _FAST_INVALIDATION
+
+    assert _FAST_INVALIDATION == ["system_rankings", "system_kills", "global_kills"]

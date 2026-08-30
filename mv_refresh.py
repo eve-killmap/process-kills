@@ -30,13 +30,13 @@ from stream import publish_invalidation
 
 _FAST_VIEWS = [
     "mv_kills_per_system",
-    "mv_kills_per_system_24h",
-    "mv_kills_per_system_7d",
-    "mv_kills_per_system_30d",
-    "mv_kills_per_system_6m",
-    "mv_kills_per_system_1y",
+    "mv_kills_per_system_daily",
     "mv_alliance_member_count",
 ]
+
+# MV-derived cache targets the backend flushes/warms on the fast-refresh signal
+# (spec §6.1/§11). Broadcast whole; unknown targets are ignored by older backends.
+_FAST_INVALIDATION = ["system_rankings", "system_kills", "global_kills"]
 
 _SLOW_VIEWS = [
     "mv_farthest_kill_per_system",
@@ -56,7 +56,7 @@ async def fast_refresh_scheduler(
         shutdown_event,
         next_run=_next_fast_refresh_time,
         views=_FAST_VIEWS,
-        invalidation=["system_rankings"],
+        invalidation=_FAST_INVALIDATION,
         cadence="fast",
         redis=redis,
     )

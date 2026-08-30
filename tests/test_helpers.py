@@ -78,6 +78,11 @@ def test_kills_per_system_daily_in_fast_views():
         "mv_kills_per_system_1y",
     ):
         assert mv not in _FAST_VIEWS
+    assert _FAST_VIEWS == [
+        "mv_kills_per_system",
+        "mv_kills_per_system_daily",
+        "mv_alliance_member_count",
+    ]
 
 
 def test_fast_invalidation_targets():

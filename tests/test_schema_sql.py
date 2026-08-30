@@ -151,6 +151,8 @@ def test_kills_per_system_daily_present():
     assert "idx_mv_kills_per_system_daily_day" in SCHEMA
     # day grain: grouped on the UTC-truncated killmail_time
     assert "(killmail_time AT TIME ZONE 'UTC')::date" in SCHEMA
+    assert "(solar_system_id, day) INCLUDE (kill_count)" in SCHEMA
+    assert "(day) INCLUDE (solar_system_id, kill_count)" in SCHEMA
 
 
 def test_interval_kill_mvs_removed():

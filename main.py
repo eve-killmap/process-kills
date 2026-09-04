@@ -6,7 +6,7 @@ import sys
 from types import FrameType
 
 from config import ConfigError, config, require_database_url, setup_logging
-from db import get_connection, init_schema
+from db import get_connection_with_retry, init_schema
 from esi import ESIClient
 from live import live_listener
 import metrics
@@ -44,7 +44,7 @@ async def main() -> None:
     metrics.start_metrics_server(config)
 
     logger.info("Initializing database schema...")
-    with get_connection() as conn:
+    with get_connection_with_retry() as conn:
         init_schema(conn)
 
     shutdown_event = asyncio.Event()

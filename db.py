@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -18,6 +19,45 @@ logger = logging.getLogger(__name__)
 @contextmanager
 def get_connection() -> Iterator[connection]:
     conn = psycopg2.connect(require_database_url(config))
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _connect_with_retry() -> connection:
+    budget = config.database.connect_max_retry_seconds
+    max_delay = config.database.connect_retry_max_delay_seconds
+    deadline = time.monotonic() + budget
+    delay = 1.0
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return psycopg2.connect(require_database_url(config))
+        except psycopg2.OperationalError as exc:
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "Database still unreachable after ~%ds (%d attempts); "
+                    "giving up: %s",
+                    budget,
+                    attempt,
+                    exc,
+                )
+                raise
+            logger.warning(
+                "Database not ready (attempt %d), retrying in %.0fs: %s",
+                attempt,
+                delay,
+                exc,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, max_delay)
+
+
+@contextmanager
+def get_connection_with_retry() -> Iterator[connection]:
+    conn = _connect_with_retry()
     try:
         yield conn
     finally:

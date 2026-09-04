@@ -12,6 +12,14 @@ logging:
   # Usually set via LOG_FILE in .env instead.
   # file: process-kills.log
 
+database:
+  # Startup ride-out of a transient DB outage (e.g. a package-day Postgres
+  # restart): retry the connection with exponential backoff for up to
+  # connect_max_retry_seconds (0 = no retry), each sleep capped at
+  # connect_retry_max_delay_seconds, then fail loudly.
+  connect_max_retry_seconds: 60
+  connect_retry_max_delay_seconds: 10
+
 sources:
   # Upstream endpoints. Placeholders in braces are substituted at runtime.
   r2z2_sequence_url: https://r2z2.zkillboard.com/ephemeral/sequence.json

@@ -82,6 +82,12 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class DatabaseConfig:
+    connect_max_retry_seconds: int
+    connect_retry_max_delay_seconds: int
+
+
+@dataclass(frozen=True)
 class SourcesConfig:
     r2z2_sequence_url: str
     r2z2_ephemeral_url: str
@@ -198,6 +204,7 @@ class Paths:
 class Config:
     paths: Paths
     logging: LoggingConfig
+    database: DatabaseConfig
     sources: SourcesConfig
     esi: EsiConfig
     live: LiveConfig
@@ -293,6 +300,7 @@ def load_config(
     data = _load_yaml(yaml_path or DEFAULT_CONFIG_PATH)
 
     log_cfg = _section(data, "logging")
+    db_cfg = _section(data, "database")
     src_cfg = _section(data, "sources")
     esi_cfg = _section(data, "esi")
     live_cfg = _section(data, "live")
@@ -327,6 +335,19 @@ def load_config(
         ),
         backup_count=_as_int(
             log_cfg.get("backup_count", 5), "logging.backup_count", minimum=0
+        ),
+    )
+
+    database_config = DatabaseConfig(
+        connect_max_retry_seconds=_as_int(
+            db_cfg.get("connect_max_retry_seconds", 60),
+            "database.connect_max_retry_seconds",
+            minimum=0,
+        ),
+        connect_retry_max_delay_seconds=_as_int(
+            db_cfg.get("connect_retry_max_delay_seconds", 10),
+            "database.connect_retry_max_delay_seconds",
+            minimum=1,
         ),
     )
 
@@ -501,6 +522,7 @@ def load_config(
     return Config(
         paths=paths,
         logging=logging_config,
+        database=database_config,
         sources=sources_config,
         esi=esi_config,
         live=live_config,

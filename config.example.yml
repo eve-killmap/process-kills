@@ -131,3 +131,8 @@ facets:
 # unset disables the heartbeat entirely.
 heartbeat:
   interval: 60          # seconds between heartbeat checks
+  # EVE's daily downtime (UTC): send a keep-alive beat even with no kills so the
+  # monitor doesn't false-alarm while the killstream is quiet. downtime_minutes: 0
+  # disables it.
+  downtime_hour: 11
+  downtime_minutes: 20

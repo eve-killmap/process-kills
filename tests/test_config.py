@@ -178,6 +178,8 @@ def test_mv_refresh_interval_minutes_must_be_positive(tmp_path):
 def test_heartbeat_defaults(tmp_path):
     cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
     assert cfg.heartbeat.interval == 60
+    assert cfg.heartbeat.downtime_hour == 11
+    assert cfg.heartbeat.downtime_minutes == 20
     assert cfg.uptime_kuma_push_url is None
 
 
@@ -199,6 +201,12 @@ def test_heartbeat_interval_from_yaml(tmp_path):
 def test_heartbeat_interval_must_be_positive(tmp_path):
     yaml_path = write_yaml(tmp_path, "heartbeat:\n  interval: 0\n")
     with pytest.raises(ConfigError, match="heartbeat.interval"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_heartbeat_downtime_hour_out_of_range_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  downtime_hour: 24\n")
+    with pytest.raises(ConfigError, match="heartbeat.downtime_hour"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 

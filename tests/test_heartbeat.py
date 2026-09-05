@@ -1,4 +1,6 @@
 import asyncio
+from dataclasses import replace
+from datetime import datetime, timezone
 
 from prometheus_client import REGISTRY
 
@@ -8,6 +10,17 @@ import metrics
 
 def _val(name, labels):
     return REGISTRY.get_sample_value(name, labels) or 0.0
+
+
+def _pin_downtime(monkeypatch, hour, minutes):
+    # Pin the downtime window so tests don't depend on the live config.yml.
+    pinned = replace(
+        heartbeat.config,
+        heartbeat=replace(
+            heartbeat.config.heartbeat, downtime_hour=hour, downtime_minutes=minutes
+        ),
+    )
+    monkeypatch.setattr(heartbeat, "config", pinned)
 
 
 class _FakeResp:
@@ -63,7 +76,8 @@ def test_build_push_url_strips_existing_query():
     assert url.startswith("https://k/api/push/tok?")
 
 
-def test_tick_pushes_only_when_work_advanced():
+def test_tick_pushes_only_when_work_advanced(monkeypatch):
+    _pin_downtime(monkeypatch, 11, 0)  # disable the downtime keep-alive here
     session = _FakeSession()
     # No new work since last_seen -> no push.
     current = heartbeat._live_work_total()
@@ -86,3 +100,52 @@ def test_send_records_success_and_failure():
     before_bad = _val("eve_killmap_heartbeat_pushes_total", {"result": "failed"})
     asyncio.run(heartbeat._send(_FakeSession(status=500), "https://k/api/push/tok?x"))
     assert _val("eve_killmap_heartbeat_pushes_total", {"result": "failed"}) == before_bad + 1
+
+
+def test_in_downtime_window(monkeypatch):
+    _pin_downtime(monkeypatch, 11, 20)
+    assert heartbeat._in_downtime(datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc))
+    assert heartbeat._in_downtime(datetime(2024, 1, 1, 11, 19, tzinfo=timezone.utc))
+    assert not heartbeat._in_downtime(datetime(2024, 1, 1, 11, 20, tzinfo=timezone.utc))
+    assert not heartbeat._in_downtime(datetime(2024, 1, 1, 10, 59, tzinfo=timezone.utc))
+
+
+def test_in_downtime_disabled_when_minutes_zero(monkeypatch):
+    _pin_downtime(monkeypatch, 11, 0)
+    assert not heartbeat._in_downtime(datetime(2024, 1, 1, 11, 5, tzinfo=timezone.utc))
+
+
+def test_tick_keepalive_during_downtime_without_work(monkeypatch):
+    _pin_downtime(monkeypatch, 11, 20)
+    session = _FakeSession()
+    current = heartbeat._live_work_total()
+    new = asyncio.run(
+        heartbeat._tick(
+            session,
+            "https://k/api/push/tok",
+            current,
+            60,
+            now=datetime(2024, 1, 1, 11, 5, tzinfo=timezone.utc),
+        )
+    )
+    assert new == current  # no work happened
+    assert len(session.urls) == 1
+    assert "status=up" in session.urls[0]
+    assert "eve+downtime" in session.urls[0]
+
+
+def test_tick_silent_outside_downtime_without_work(monkeypatch):
+    _pin_downtime(monkeypatch, 11, 20)
+    session = _FakeSession()
+    current = heartbeat._live_work_total()
+    new = asyncio.run(
+        heartbeat._tick(
+            session,
+            "https://k/api/push/tok",
+            current,
+            60,
+            now=datetime(2024, 1, 1, 3, 0, tzinfo=timezone.utc),
+        )
+    )
+    assert new == current
+    assert session.urls == []

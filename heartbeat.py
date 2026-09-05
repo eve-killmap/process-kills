@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import aiohttp
@@ -67,15 +68,36 @@ async def _send(session: aiohttp.ClientSession, url: str) -> None:
         logger.warning("Heartbeat push failed: %s", e)
 
 
+def _in_downtime(now: datetime) -> bool:
+    """True if `now` (UTC) is within EVE's configured daily downtime window, when
+    the killstream is expected to be quiet. downtime_minutes <= 0 disables it.
+    Assumes the window does not cross midnight (EVE downtime is ~11:00 UTC)."""
+    minutes = config.heartbeat.downtime_minutes
+    if minutes <= 0:
+        return False
+    start = config.heartbeat.downtime_hour * 60
+    now_min = now.hour * 60 + now.minute
+    return start <= now_min < start + minutes
+
+
 async def _tick(
-    session: aiohttp.ClientSession, url: str, last_seen: float, interval: int
+    session: aiohttp.ClientSession,
+    url: str,
+    last_seen: float,
+    interval: int,
+    now: datetime | None = None,
 ) -> float:
-    """One heartbeat check: push 'up' iff live work advanced since last_seen.
-    Returns the new baseline (whether or not a push was sent)."""
+    """One heartbeat check. Push 'up' if live work advanced since last_seen;
+    otherwise, during EVE's downtime window, send a keep-alive 'up' (the process
+    must be alive to send it, so a real crash in that window is still caught).
+    Returns the new baseline."""
+    now = now or datetime.now(timezone.utc)
     current = _live_work_total()
     delta = current - last_seen
     if delta > 0:
         await _send(session, _build_push_url(url, "up", f"{int(delta)} kills/{interval}s"))
+    elif _in_downtime(now):
+        await _send(session, _build_push_url(url, "up", "eve downtime"))
     return current
 
 

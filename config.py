@@ -197,6 +197,8 @@ class FacetsConfig:
 @dataclass(frozen=True)
 class HeartbeatConfig:
     interval: int
+    downtime_hour: int
+    downtime_minutes: int
 
 
 @dataclass(frozen=True)
@@ -526,6 +528,17 @@ def load_config(
     heartbeat_config = HeartbeatConfig(
         interval=_as_int(
             heartbeat_cfg.get("interval", 60), "heartbeat.interval", minimum=1
+        ),
+        downtime_hour=_as_int(
+            heartbeat_cfg.get("downtime_hour", 11),
+            "heartbeat.downtime_hour",
+            minimum=0,
+            maximum=23,
+        ),
+        downtime_minutes=_as_int(
+            heartbeat_cfg.get("downtime_minutes", 20),
+            "heartbeat.downtime_minutes",
+            minimum=0,
         ),
     )
 

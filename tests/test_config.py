@@ -175,6 +175,33 @@ def test_mv_refresh_interval_minutes_must_be_positive(tmp_path):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
+def test_heartbeat_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.heartbeat.interval == 60
+    assert cfg.uptime_kuma_push_url is None
+
+
+def test_uptime_kuma_push_url_from_env(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "missing.yml",
+        env={"UPTIME_KUMA_PUSH_URL": "https://k/api/push/tok"},
+        base_dir=tmp_path,
+    )
+    assert cfg.uptime_kuma_push_url == "https://k/api/push/tok"
+
+
+def test_heartbeat_interval_from_yaml(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  interval: 30\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.heartbeat.interval == 30
+
+
+def test_heartbeat_interval_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  interval: 0\n")
+    with pytest.raises(ConfigError, match="heartbeat.interval"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
 def test_streaming_max_length_above_max_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "streaming:\n  stream_max_length: 10000\n")
     with pytest.raises(ConfigError, match="stream_max_length"):

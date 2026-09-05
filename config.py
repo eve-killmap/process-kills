@@ -195,6 +195,11 @@ class FacetsConfig:
 
 
 @dataclass(frozen=True)
+class HeartbeatConfig:
+    interval: int
+
+
+@dataclass(frozen=True)
 class Paths:
     base_dir: Path
     data_dir: Path
@@ -220,9 +225,11 @@ class Config:
     corporations: CorporationsConfig
     factions: FactionsConfig
     facets: FacetsConfig
+    heartbeat: HeartbeatConfig
     user_agent: str
     database_url: str | None
     redis_url: str
+    uptime_kuma_push_url: str | None
 
 
 def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
@@ -305,6 +312,7 @@ def load_config(
     corporations_cfg = _section(data, "corporations")
     factions_cfg = _section(data, "factions")
     facets_cfg = _section(data, "facets")
+    heartbeat_cfg = _section(data, "heartbeat")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -504,6 +512,12 @@ def load_config(
         enabled=bool(facets_cfg.get("enabled", False)),
     )
 
+    heartbeat_config = HeartbeatConfig(
+        interval=_as_int(
+            heartbeat_cfg.get("interval", 60), "heartbeat.interval", minimum=1
+        ),
+    )
+
     data_dir = Path(env.get("DATA_DIR") or base_dir / "data")
     paths = Paths(base_dir=base_dir, data_dir=data_dir)
 
@@ -526,9 +540,11 @@ def load_config(
         corporations=corporations_config,
         factions=factions_config,
         facets=facets_config,
+        heartbeat=heartbeat_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,
+        uptime_kuma_push_url=env.get("UPTIME_KUMA_PUSH_URL") or None,
     )
 
 

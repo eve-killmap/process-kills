@@ -214,6 +214,15 @@ redis_connected = Gauge(
 )
 
 
+# Uptime Kuma heartbeat
+
+heartbeat_pushes = Counter(
+    "eve_killmap_heartbeat_pushes",
+    "Uptime Kuma push-heartbeat results, by result.",
+    ["result"],  # success|failed
+)
+
+
 # Health and Meta
 
 errors = Counter(

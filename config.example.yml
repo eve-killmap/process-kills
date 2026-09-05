@@ -125,3 +125,10 @@ factions:
 # it only AFTER the one-time historical backfill.
 facets:
   enabled: false
+
+# Uptime Kuma push heartbeat: sent only when live kills were processed in the
+# interval, so a heartbeat means the pipeline is actually working (not just up).
+# The push URL is a secret and lives in .env (UPTIME_KUMA_PUSH_URL); leaving it
+# unset disables the heartbeat entirely.
+heartbeat:
+  interval: 60          # seconds between heartbeat checks

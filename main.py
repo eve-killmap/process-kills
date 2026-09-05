@@ -18,6 +18,7 @@ import entities
 import wars
 import corporations
 import factions
+import heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ async def main() -> None:
         wars.war_scheduler(esi_client, shutdown_event),
         corporations.corporation_refresh_scheduler(esi_client, shutdown_event),
         factions.faction_scheduler(esi_client, shutdown_event),
+        heartbeat.heartbeat_scheduler(shutdown_event),
     ]
     if config.recheck.enabled:
         tasks.append(no_position_rechecking(esi_client, shutdown_event))

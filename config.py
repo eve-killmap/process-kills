@@ -242,13 +242,24 @@ def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
 def _as_int(
     value: Any, label: str, *, minimum: int | None = None, maximum: int | None = None
 ) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
+    if isinstance(value, bool):
         raise ConfigError(f"Config value '{label}' must be an integer, got {value!r}")
-    if minimum is not None and value < minimum:
-        raise ConfigError(f"Config value '{label}' must be >= {minimum}, got {value}")
-    if maximum is not None and value > maximum:
-        raise ConfigError(f"Config value '{label}' must be <= {maximum}, got {value}")
-    return value
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        try:
+            result = int(value.strip())
+        except ValueError:
+            raise ConfigError(
+                f"Config value '{label}' must be an integer, got {value!r}"
+            ) from None
+    else:
+        raise ConfigError(f"Config value '{label}' must be an integer, got {value!r}")
+    if minimum is not None and result < minimum:
+        raise ConfigError(f"Config value '{label}' must be >= {minimum}, got {result}")
+    if maximum is not None and result > maximum:
+        raise ConfigError(f"Config value '{label}' must be <= {maximum}, got {result}")
+    return result
 
 
 def _as_positive_float(value: Any, label: str) -> float:
@@ -450,9 +461,9 @@ def load_config(
 
     metrics_config = MetricsConfig(
         enabled=bool(metrics_cfg.get("enabled", False)),
-        host=metrics_cfg.get("host") or "0.0.0.0",
+        host=env.get("METRICS_HOST") or "0.0.0.0",
         port=_as_int(
-            metrics_cfg.get("port", 9108), "metrics.port", minimum=1, maximum=65535
+            env.get("METRICS_PORT") or 9108, "METRICS_PORT", minimum=1, maximum=65535
         ),
     )
 

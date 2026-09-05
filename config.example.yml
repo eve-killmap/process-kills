@@ -90,12 +90,11 @@ backfill:
   day_path: /{year}/killmails-{date}.tar.bz2
 
 metrics:
-  # Expose a Prometheus scrape endpoint (/metrics) on host:port. Off by default
-  # (enabling opens a listening socket). Application-level metrics only; Postgres
-  # internals come from a separate DB exporter.
+  # Expose a Prometheus scrape endpoint (/metrics). Off by default (enabling opens
+  # a listening socket). Application-level metrics only; Postgres internals come
+  # from a separate DB exporter. The listen host:port live in .env (METRICS_HOST,
+  # METRICS_PORT; default 0.0.0.0:9108).
   enabled: false
-  host: 0.0.0.0
-  port: 9108
 
 # Entity enrichment: resolve killmail IDs to names/tickers at ingestion.
 entities:

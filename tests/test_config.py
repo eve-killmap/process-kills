@@ -223,19 +223,34 @@ def test_metrics_defaults_and_override(tmp_path):
     assert default_cfg.metrics.host == "0.0.0.0"
     assert default_cfg.metrics.port == 9108
 
-    yaml_path = write_yaml(
-        tmp_path, "metrics:\n  enabled: true\n  host: 127.0.0.1\n  port: 9200\n"
+    # enabled stays in config.yml; host/port move to .env (strings, coerced to int).
+    yaml_path = write_yaml(tmp_path, "metrics:\n  enabled: true\n")
+    cfg = load_config(
+        yaml_path=yaml_path,
+        env={"METRICS_HOST": "127.0.0.1", "METRICS_PORT": "9200"},
+        base_dir=tmp_path,
     )
-    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
     assert cfg.metrics.enabled is True
     assert cfg.metrics.host == "127.0.0.1"
     assert cfg.metrics.port == 9200
 
 
 def test_metrics_invalid_port_raises(tmp_path):
-    yaml_path = write_yaml(tmp_path, "metrics:\n  port: 70000\n")
-    with pytest.raises(ConfigError, match="metrics.port"):
-        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    with pytest.raises(ConfigError, match="METRICS_PORT"):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "70000"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_non_numeric_port_raises(tmp_path):
+    with pytest.raises(ConfigError, match="METRICS_PORT"):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "abc"},
+            base_dir=tmp_path,
+        )
 
 
 def test_negative_batch_size_raises(tmp_path):

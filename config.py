@@ -129,7 +129,7 @@ class CrosscheckConfig:
 class RefreshConfig:
     day: int
     hour: int
-    mv_refresh_hours: list[int]
+    mv_refresh_interval_minutes: int
 
 
 @dataclass(frozen=True)
@@ -242,17 +242,6 @@ def _as_int(
     if maximum is not None and value > maximum:
         raise ConfigError(f"Config value '{label}' must be <= {maximum}, got {value}")
     return value
-
-
-def _as_int_list(
-    value: Any, label: str, *, minimum: int | None = None, maximum: int | None = None
-) -> list[int]:
-    if not isinstance(value, list):
-        raise ConfigError(f"Config value '{label}' must be a list of integers")
-    return [
-        _as_int(item, f"{label}[{i}]", minimum=minimum, maximum=maximum)
-        for i, item in enumerate(value)
-    ]
 
 
 def _as_positive_float(value: Any, label: str) -> float:
@@ -410,11 +399,10 @@ def load_config(
     refresh_config = RefreshConfig(
         day=_as_int(refresh_cfg.get("day", 6), "refresh.day", minimum=0, maximum=6),
         hour=_as_int(refresh_cfg.get("hour", 4), "refresh.hour", minimum=0, maximum=23),
-        mv_refresh_hours=_as_int_list(
-            refresh_cfg.get("mv_refresh_hours", [0, 6, 12, 18]),
-            "refresh.mv_refresh_hours",
-            minimum=0,
-            maximum=23,
+        mv_refresh_interval_minutes=_as_int(
+            refresh_cfg.get("mv_refresh_interval_minutes", 360),
+            "refresh.mv_refresh_interval_minutes",
+            minimum=1,
         ),
     )
 

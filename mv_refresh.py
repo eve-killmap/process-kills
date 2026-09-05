@@ -4,7 +4,7 @@ Materialized-view refresh scheduling.
 All refreshes are online (REFRESH MATERIALIZED VIEW CONCURRENTLY — no lock that
 blocks readers, and the live listener keeps running), on two configurable cadences:
 
-  - "fast" (config.refresh.mv_refresh_hours; default 00:00/06:00/12:00/18:00 UTC):
+  - "fast" (config.refresh.mv_refresh_interval_minutes; default every 360 min):
     the per-system kill-count MVs behind system rankings.
   - "slow" (weekly, config.refresh.day/hour): the slow-changing MVs — farthest
     kill per system and the weapon-search set.
@@ -49,7 +49,7 @@ async def fast_refresh_scheduler(
     shutdown_event: asyncio.Event,
     redis: aioredis.Redis | None = None,
 ) -> None:
-    """Refresh the per-system kill-count MVs on the fast cadence (config.refresh.mv_refresh_hours)."""
+    """Refresh the per-system kill-count MVs on the fast cadence (config.refresh.mv_refresh_interval_minutes)."""
     await _refresh_loop(
         shutdown_event,
         next_run=_next_fast_refresh_time,
@@ -131,14 +131,14 @@ def _next_slow_refresh_time(now: datetime) -> datetime:
 
 
 def _next_fast_refresh_time(now: datetime) -> datetime:
-    for hour in sorted(config.refresh.mv_refresh_hours):
-        candidate = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        if candidate > now:
-            return candidate
-    first_hour = sorted(config.refresh.mv_refresh_hours)[0]
-    return (now + timedelta(days=1)).replace(
-        hour=first_hour, minute=0, second=0, microsecond=0
-    )
+    """Next wall-clock boundary that is a whole multiple of the fast interval
+    since midnight UTC (e.g. 30 -> :00 and :30). The schedule re-anchors at
+    midnight, so an interval that does not divide evenly into 1440 min leaves a
+    short final bucket before 00:00; 30/60/120/360 divide cleanly."""
+    interval = timedelta(minutes=config.refresh.mv_refresh_interval_minutes)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    n = int((now - midnight) // interval) + 1
+    return midnight + n * interval
 
 
 def _refresh_views(views: list[str]) -> None:

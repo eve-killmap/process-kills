@@ -1,6 +1,8 @@
 import re
+from dataclasses import replace
 from datetime import datetime, timezone
 
+import mv_refresh
 from crosscheck import _fix_date
 from live import _killmail_time_to_date
 from mv_refresh import _next_slow_refresh_time, _next_fast_refresh_time
@@ -45,15 +47,27 @@ def test_next_slow_refresh_time_same_day_after_hour_rolls_a_week():
     )
 
 
-def test_next_fast_refresh_time_picks_next_slot_today():
-    # Default mv_refresh_hours: [0, 6, 12, 18]; 07:00 -> 12:00 same day.
-    now = datetime(2024, 1, 3, 7, 0, tzinfo=timezone.utc)
+def _pin_interval(monkeypatch, minutes):
+    # Pin the fast interval so these tests don't depend on the live config.yml.
+    pinned = replace(
+        mv_refresh.config,
+        refresh=replace(mv_refresh.config.refresh, mv_refresh_interval_minutes=minutes),
+    )
+    monkeypatch.setattr(mv_refresh, "config", pinned)
+
+
+def test_next_fast_refresh_time_picks_next_interval_boundary(monkeypatch):
+    # 30-min interval: 07:12 -> next wall-clock half-hour, 07:30.
+    _pin_interval(monkeypatch, 30)
+    now = datetime(2024, 1, 3, 7, 12, tzinfo=timezone.utc)
     assert _next_fast_refresh_time(now) == datetime(
-        2024, 1, 3, 12, 0, tzinfo=timezone.utc
+        2024, 1, 3, 7, 30, tzinfo=timezone.utc
     )
 
 
-def test_next_fast_refresh_time_rolls_to_next_day():
+def test_next_fast_refresh_time_rolls_to_next_day(monkeypatch):
+    # 360-min interval boundaries are 00/06/12/18; 19:00 -> next day 00:00.
+    _pin_interval(monkeypatch, 360)
     now = datetime(2024, 1, 3, 19, 0, tzinfo=timezone.utc)
     assert _next_fast_refresh_time(now) == datetime(
         2024, 1, 4, 0, 0, tzinfo=timezone.utc

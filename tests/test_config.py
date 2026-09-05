@@ -29,7 +29,7 @@ def test_defaults_used_when_no_yaml_and_empty_env(tmp_path):
     assert cfg.crosscheck.hour == 1
     assert cfg.refresh.day == 6
     assert cfg.refresh.hour == 4
-    assert cfg.refresh.mv_refresh_hours == [0, 6, 12, 18]
+    assert cfg.refresh.mv_refresh_interval_minutes == 360
     assert cfg.streaming.stream_name == "kills:live"
     assert cfg.streaming.stream_max_length == 1000
     assert cfg.streaming.discard_older_than == 7200
@@ -169,9 +169,9 @@ def test_refresh_day_out_of_range_raises(tmp_path):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
-def test_mv_refresh_hours_must_be_int_list(tmp_path):
-    yaml_path = write_yaml(tmp_path, "refresh:\n  mv_refresh_hours: 6\n")
-    with pytest.raises(ConfigError, match="mv_refresh_hours"):
+def test_mv_refresh_interval_minutes_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "refresh:\n  mv_refresh_interval_minutes: 0\n")
+    with pytest.raises(ConfigError, match="mv_refresh_interval_minutes"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 

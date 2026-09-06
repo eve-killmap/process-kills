@@ -210,6 +210,20 @@ def test_heartbeat_downtime_hour_out_of_range_raises(tmp_path):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
+def test_refresh_work_mem_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.refresh.work_mem == "512MB"
+    yaml_path = write_yaml(tmp_path, "refresh:\n  work_mem: 1GB\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.refresh.work_mem == "1GB"
+
+
+def test_refresh_work_mem_invalid_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "refresh:\n  work_mem: not-a-size\n")
+    with pytest.raises(ConfigError, match="refresh.work_mem"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
 def test_streaming_max_length_above_max_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "streaming:\n  stream_max_length: 10000\n")
     with pytest.raises(ConfigError, match="stream_max_length"):

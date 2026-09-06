@@ -145,6 +145,9 @@ def _refresh_views(views: list[str]) -> None:
     with get_connection() as conn:
         conn.autocommit = True
         with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT set_config('work_mem', %s, false)", (config.refresh.work_mem,)
+            )
             for view in views:
                 logger.info(f"Refreshing materialized view {view}...")
                 cursor.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view}")

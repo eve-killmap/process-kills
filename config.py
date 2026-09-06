@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -130,6 +131,7 @@ class RefreshConfig:
     day: int
     hour: int
     mv_refresh_interval_minutes: int
+    work_mem: str
 
 
 @dataclass(frozen=True)
@@ -417,6 +419,12 @@ def load_config(
         ),
     )
 
+    refresh_work_mem = str(refresh_cfg.get("work_mem", "512MB")).strip()
+    if not re.fullmatch(r"\d+\s*(kB|MB|GB|TB)?", refresh_work_mem, re.IGNORECASE):
+        raise ConfigError(
+            "Config value 'refresh.work_mem' must be a Postgres memory size like "
+            f"'512MB' or '1GB', got {refresh_work_mem!r}"
+        )
     refresh_config = RefreshConfig(
         day=_as_int(refresh_cfg.get("day", 6), "refresh.day", minimum=0, maximum=6),
         hour=_as_int(refresh_cfg.get("hour", 4), "refresh.hour", minimum=0, maximum=23),
@@ -425,6 +433,7 @@ def load_config(
             "refresh.mv_refresh_interval_minutes",
             minimum=1,
         ),
+        work_mem=refresh_work_mem,
     )
 
     streaming_config = StreamingConfig(

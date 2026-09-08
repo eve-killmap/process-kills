@@ -38,9 +38,7 @@ def test_connect_with_retry_gives_up_after_budget(monkeypatch):
     _patch_dsn(monkeypatch)
     patched = dataclasses.replace(
         real_config,
-        database=dataclasses.replace(
-            real_config.database, connect_max_retry_seconds=0
-        ),
+        database=dataclasses.replace(real_config.database, connect_max_retry_seconds=0),
     )
     monkeypatch.setattr(db_mod, "config", patched)
     calls = {"n": 0}

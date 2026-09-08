@@ -95,11 +95,17 @@ def test_tick_pushes_only_when_work_advanced(monkeypatch):
 def test_send_records_success_and_failure():
     before_ok = _val("eve_killmap_heartbeat_pushes_total", {"result": "success"})
     asyncio.run(heartbeat._send(_FakeSession(status=200), "https://k/api/push/tok?x"))
-    assert _val("eve_killmap_heartbeat_pushes_total", {"result": "success"}) == before_ok + 1
+    assert (
+        _val("eve_killmap_heartbeat_pushes_total", {"result": "success"})
+        == before_ok + 1
+    )
 
     before_bad = _val("eve_killmap_heartbeat_pushes_total", {"result": "failed"})
     asyncio.run(heartbeat._send(_FakeSession(status=500), "https://k/api/push/tok?x"))
-    assert _val("eve_killmap_heartbeat_pushes_total", {"result": "failed"}) == before_bad + 1
+    assert (
+        _val("eve_killmap_heartbeat_pushes_total", {"result": "failed"})
+        == before_bad + 1
+    )
 
 
 def test_in_downtime_window(monkeypatch):

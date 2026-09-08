@@ -95,7 +95,9 @@ async def _tick(
     current = _live_work_total()
     delta = current - last_seen
     if delta > 0:
-        await _send(session, _build_push_url(url, "up", f"{int(delta)} kills/{interval}s"))
+        await _send(
+            session, _build_push_url(url, "up", f"{int(delta)} kills/{interval}s")
+        )
     elif _in_downtime(now):
         await _send(session, _build_push_url(url, "up", "eve downtime"))
     return current

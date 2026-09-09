@@ -57,6 +57,7 @@ _DEFAULT_SOURCES = {
     "esi_killmail_url": "https://esi.evetech.net/killmails/{killmail_id}/{killmail_hash}/",
     "zkb_totals_url": "https://r2z2.zkillboard.com/history/totals.json",
     "zkb_day_url": "https://r2z2.zkillboard.com/history/{date}.json",
+    "zkb_killmail_url": "https://zkillboard.com/api/killID/{killmail_id}/",
     "esi_names_url": "https://esi.evetech.net/universe/names/",
     "esi_corporation_url": "https://esi.evetech.net/corporations/{corporation_id}/",
     "esi_alliance_url": "https://esi.evetech.net/alliances/{alliance_id}/",
@@ -95,6 +96,7 @@ class SourcesConfig:
     esi_killmail_url: str
     zkb_totals_url: str
     zkb_day_url: str
+    zkb_killmail_url: str
     esi_names_url: str
     esi_corporation_url: str
     esi_alliance_url: str
@@ -373,6 +375,8 @@ def load_config(
         zkb_totals_url=src_cfg.get("zkb_totals_url")
         or _DEFAULT_SOURCES["zkb_totals_url"],
         zkb_day_url=src_cfg.get("zkb_day_url") or _DEFAULT_SOURCES["zkb_day_url"],
+        zkb_killmail_url=src_cfg.get("zkb_killmail_url")
+        or _DEFAULT_SOURCES["zkb_killmail_url"],
         esi_names_url=src_cfg.get("esi_names_url") or _DEFAULT_SOURCES["esi_names_url"],
         esi_corporation_url=src_cfg.get("esi_corporation_url")
         or _DEFAULT_SOURCES["esi_corporation_url"],

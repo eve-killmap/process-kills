@@ -27,6 +27,7 @@ sources:
   esi_killmail_url: https://esi.evetech.net/killmails/{killmail_id}/{killmail_hash}/
   zkb_totals_url: https://r2z2.zkillboard.com/history/totals.json
   zkb_day_url: https://r2z2.zkillboard.com/history/{date}.json
+  zkb_killmail_url: https://zkillboard.com/api/killID/{killmail_id}/
 
 esi:
   # ESI token-bucket rate limit: rate_limit tokens per rate_limit_window seconds.

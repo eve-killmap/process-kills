@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import entities
 import facets
 import metrics
+import zkb
 from config import BEGIN_DATE, config
 from esi import ESIClient, Priority, parse_kill
 from db import (
@@ -14,6 +15,7 @@ from db import (
     update_processed_date,
     insert_kill,
     insert_facets,
+    insert_zkb_metadata,
     insert_no_position_kill,
     insert_war_stub,
     get_existing_killmail_ids,
@@ -219,6 +221,27 @@ async def _crosscheck_date(
                             logger.warning(
                                 f"Facet write failed for kill {killmail_id}: {e}"
                             )
+                    try:
+                        zkb_resp = await esi_client.fetch_url(
+                            config.sources.zkb_killmail_url.format(
+                                killmail_id=killmail_id
+                            )
+                        )
+                        zkb_obj = zkb.extract_zkb(zkb_resp)
+                        if zkb_obj:
+                            insert_zkb_metadata(
+                                conn,
+                                parsed["killmail_id"],
+                                parsed["solar_system_id"],
+                                parsed["killmail_time"],
+                                zkb.parse_zkb(zkb_obj),
+                            )
+                            metrics.zkb_written.inc()
+                    except Exception as e:
+                        metrics.errors.labels("zkb").inc()
+                        logger.warning(
+                            f"zkb fetch/write failed for kill {killmail_id}: {e}"
+                        )
             else:
                 inserted = insert_no_position_kill(
                     conn, killmail_id, killmail_hash, killmail_time

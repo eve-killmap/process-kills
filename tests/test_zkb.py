@@ -1,4 +1,4 @@
-from zkb import parse_zkb
+from zkb import extract_zkb, parse_zkb
 
 
 def test_parse_zkb_maps_fields():
@@ -38,3 +38,17 @@ def test_parse_zkb_missing_fields_default():
 
 def test_parse_zkb_null_labels_becomes_empty_list():
     assert parse_zkb({"labels": None})["labels"] == []
+
+
+def test_extract_zkb_from_killid_response():
+    # zKillboard killID returns a one-element list: the kill plus its zkb envelope.
+    resp = [{"killmail_id": 1, "solar_system_id": 30000142, "zkb": {"totalValue": 5.0}}]
+    assert extract_zkb(resp) == {"totalValue": 5.0}
+
+
+def test_extract_zkb_returns_none_when_absent_or_malformed():
+    assert extract_zkb([]) is None  # empty list (unknown kill)
+    assert extract_zkb(None) is None  # fetch failed
+    assert extract_zkb({"zkb": {}}) is None  # not a list
+    assert extract_zkb([{"killmail_id": 1}]) is None  # no zkb key
+    assert extract_zkb([{"zkb": "nope"}]) is None  # zkb not an object

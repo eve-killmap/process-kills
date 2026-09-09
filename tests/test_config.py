@@ -224,6 +224,20 @@ def test_refresh_work_mem_invalid_raises(tmp_path):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
 
 
+def test_zkb_killmail_url_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert (
+        default_cfg.sources.zkb_killmail_url
+        == "https://zkillboard.com/api/killID/{killmail_id}/"
+    )
+    yaml_path = write_yaml(
+        tmp_path,
+        "sources:\n  zkb_killmail_url: https://example.test/k/{killmail_id}/\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.sources.zkb_killmail_url == "https://example.test/k/{killmail_id}/"
+
+
 def test_streaming_max_length_above_max_raises(tmp_path):
     yaml_path = write_yaml(tmp_path, "streaming:\n  stream_max_length: 10000\n")
     with pytest.raises(ConfigError, match="stream_max_length"):

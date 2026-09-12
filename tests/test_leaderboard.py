@@ -143,3 +143,190 @@ def test_find_dirty_days_returns_dates_since():
     assert "SELECT DISTINCT (killmail_time AT TIME ZONE 'UTC')::date" in sql
     assert "FROM kills WHERE inserted_time > %s" in sql
     assert params == (since,)
+
+
+from dataclasses import replace
+
+from prometheus_client import REGISTRY
+
+
+def _metric(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels or {}) or 0.0
+
+
+def _pin_top_n(monkeypatch, n):
+    pinned = replace(
+        leaderboard.config,
+        leaderboard=replace(leaderboard.config.leaderboard, top_n=n),
+    )
+    monkeypatch.setattr(leaderboard, "config", pinned)
+
+
+# roll_dirty_days -------------------------------------------------------------
+
+
+def test_roll_dirty_days_skips_without_watermark(monkeypatch):
+    conn = _FakeConn([[]])  # SELECT watermark -> no row
+    called = []
+    monkeypatch.setattr(leaderboard, "roll_day", lambda c, d: called.append(d))
+
+    assert leaderboard.roll_dirty_days(conn) is False
+    assert called == []
+    assert len(conn.cur.executed) == 1
+    assert conn.commits == 0
+
+
+def test_roll_dirty_days_rolls_each_day_and_advances_watermark(monkeypatch):
+    wm = datetime(2024, 1, 2, 10, tzinfo=timezone.utc)
+    t0 = datetime(2024, 1, 2, 12, tzinfo=timezone.utc)
+    conn = _FakeConn()
+    seen = {}
+    monkeypatch.setattr(leaderboard, "read_watermark", lambda c: wm)
+    monkeypatch.setattr(leaderboard, "db_now", lambda c: t0)
+    monkeypatch.setattr(
+        leaderboard,
+        "find_dirty_days",
+        lambda c, since: seen.setdefault("since", since)
+        and [date(2024, 1, 1), date(2024, 1, 2)],
+    )
+    rolled = []
+    monkeypatch.setattr(leaderboard, "roll_day", lambda c, d: rolled.append(d) or 7)
+    monkeypatch.setattr(leaderboard, "set_watermark", lambda c, ts: seen.setdefault("wm", ts))
+    before = _metric("eve_killmap_entity_rollup_days_rolled_total")
+
+    assert leaderboard.roll_dirty_days(conn) is True
+
+    assert seen["since"] == wm - timedelta(hours=1)
+    assert rolled == [date(2024, 1, 1), date(2024, 1, 2)]
+    assert seen["wm"] == t0
+    assert _metric("eve_killmap_entity_rollup_days_rolled_total") == before + 2
+    assert _metric("eve_killmap_entity_rollup_watermark_timestamp_seconds") == t0.timestamp()
+
+
+def test_roll_dirty_days_does_not_advance_watermark_on_failure(monkeypatch):
+    wm = datetime(2024, 1, 2, 10, tzinfo=timezone.utc)
+    conn = _FakeConn()
+    monkeypatch.setattr(leaderboard, "read_watermark", lambda c: wm)
+    monkeypatch.setattr(leaderboard, "db_now", lambda c: wm + timedelta(hours=2))
+    monkeypatch.setattr(
+        leaderboard, "find_dirty_days", lambda c, s: [date(2024, 1, 1), date(2024, 1, 2)]
+    )
+
+    def roll(c, d):
+        if d == date(2024, 1, 2):
+            raise RuntimeError("boom")
+        return 1
+
+    monkeypatch.setattr(leaderboard, "roll_day", roll)
+    advanced = []
+    monkeypatch.setattr(leaderboard, "set_watermark", lambda c, ts: advanced.append(ts))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        leaderboard.roll_dirty_days(conn)
+    assert advanced == []
+
+
+# compute_board ---------------------------------------------------------------
+
+
+def test_compute_board_windowed_uses_backend_predicate(monkeypatch):
+    _pin_top_n(monkeypatch, 25)
+    conn = _FakeConn([0, 275])  # DELETE rowcount, INSERT rowcount
+
+    written = leaderboard.compute_board(conn, "week")
+
+    assert written == 275
+    (del_sql, del_params), (ins_sql, ins_params) = conn.cur.executed
+    assert del_sql == "DELETE FROM entity_leaderboard WHERE window_key = %(window)s"
+    assert ins_sql.startswith("INSERT INTO entity_leaderboard")
+    assert "day > CURRENT_DATE - %(interval)s::interval" in ins_sql
+    assert "ORDER BY SUM(kill_count) DESC, facet_value" in ins_sql
+    assert "PARTITION BY facet_kind, role" in ins_sql
+    assert "WHERE rank <= %(top_n)s" in ins_sql
+    assert "'" not in ins_sql.split("CURRENT_DATE")[1].split("::interval")[0]  # bound, not inlined
+    assert ins_params == {
+        "window": "week",
+        "kinds": [1, 2, 3, 4, 5, 6],
+        "roles": [0, 1],
+        "interval": "7 days",
+        "top_n": 25,
+    }
+    assert conn.commits == 1
+
+
+def test_compute_board_all_time_has_no_day_predicate(monkeypatch):
+    _pin_top_n(monkeypatch, 25)
+    conn = _FakeConn([0, 275])
+    leaderboard.compute_board(conn, "all")
+    ins_sql, ins_params = conn.cur.executed[1]
+    assert "CURRENT_DATE" not in ins_sql
+    assert ins_params["interval"] is None and ins_params["window"] == "all"
+
+
+def test_compute_board_honors_top_n_config(monkeypatch):
+    _pin_top_n(monkeypatch, 7)
+    conn = _FakeConn([0, 77])
+    leaderboard.compute_board(conn, "day")
+    assert conn.cur.executed[1][1]["top_n"] == 7
+
+
+def test_compute_board_unknown_window_is_a_bug():
+    with pytest.raises(KeyError):
+        leaderboard.compute_board(_FakeConn(), "fortnight")
+
+
+def test_compute_board_rolls_back_on_failure(monkeypatch):
+    _pin_top_n(monkeypatch, 25)
+    conn = _FakeConn()
+
+    def boom(sql, params=None):
+        raise RuntimeError("db down")
+
+    conn.cur.execute = boom
+    with pytest.raises(RuntimeError):
+        leaderboard.compute_board(conn, "day")
+    assert conn.rollbacks == 1 and conn.commits == 0
+
+
+# compute_boards --------------------------------------------------------------
+
+
+def test_compute_boards_skips_without_watermark(monkeypatch):
+    conn = _FakeConn([[]])
+    monkeypatch.setattr(leaderboard, "compute_board", lambda c, w: pytest.fail("must not run"))
+    assert leaderboard.compute_boards(conn, ["day"]) is False
+
+
+def test_compute_boards_runs_every_window_and_records_metrics(monkeypatch):
+    conn = _FakeConn()
+    monkeypatch.setattr(leaderboard, "read_watermark", lambda c: datetime.now(timezone.utc))
+    ran = []
+    monkeypatch.setattr(leaderboard, "compute_board", lambda c, w: ran.append(w) or 10)
+    before = _metric("eve_killmap_leaderboard_computations_total", {"window": "day", "result": "success"})
+
+    assert leaderboard.compute_boards(conn, ["day", "week"]) is True
+
+    assert ran == ["day", "week"]
+    assert _metric("eve_killmap_leaderboard_computations_total", {"window": "day", "result": "success"}) == before + 1
+    assert _metric("eve_killmap_leaderboard_last_success_timestamp_seconds", {"window": "day"}) > 0
+
+
+def test_compute_boards_continues_past_a_failing_window_then_raises(monkeypatch):
+    conn = _FakeConn()
+    monkeypatch.setattr(leaderboard, "read_watermark", lambda c: datetime.now(timezone.utc))
+    ran = []
+
+    def board(c, w):
+        ran.append(w)
+        if w == "month":
+            raise RuntimeError("spill")
+        return 5
+
+    monkeypatch.setattr(leaderboard, "compute_board", board)
+    before = _metric("eve_killmap_leaderboard_computations_total", {"window": "month", "result": "failed"})
+
+    with pytest.raises(RuntimeError, match="month"):
+        leaderboard.compute_boards(conn, ["day", "month", "year"])
+
+    assert ran == ["day", "month", "year"]  # the failure did not stop the others
+    assert _metric("eve_killmap_leaderboard_computations_total", {"window": "month", "result": "failed"}) == before + 1

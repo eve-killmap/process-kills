@@ -115,3 +115,105 @@ def find_dirty_days(conn, since: datetime) -> list[date]:
             (since,),
         )
         return [row[0] for row in cursor.fetchall()]
+
+
+def roll_dirty_days(conn) -> bool:
+    """Fast-cycle step: recompute every UTC day with kills inserted since the
+    watermark (minus DIRTY_OVERLAP), then advance the watermark to the DB time
+    captured before the scan. Returns False (skipped) when no watermark exists —
+    the historical build has not run. Raises on failure, leaving the watermark
+    untouched so the next cycle retries the same set."""
+    watermark = read_watermark(conn)
+    if watermark is None:
+        logger.info(
+            "No entity rollup watermark; run sql/backfill_entity_rollup.py. Skipping."
+        )
+        return False
+    t0 = db_now(conn)
+    days = find_dirty_days(conn, watermark - DIRTY_OVERLAP)
+    for day in days:
+        start = time.monotonic()
+        written = roll_day(conn, day)
+        metrics.entity_rollup_days_rolled.inc()
+        logger.info(
+            "Rolled entity kills for %s: %d rows in %.1fs.",
+            day,
+            written,
+            time.monotonic() - start,
+        )
+    set_watermark(conn, t0)
+    metrics.entity_rollup_watermark_timestamp.set(t0.timestamp())
+    return True
+
+
+_BOARD_DELETE = "DELETE FROM entity_leaderboard WHERE window_key = %(window)s"
+# {day_predicate} is either _DAY_PREDICATE or "" — a fixed fragment, chosen by
+# window; the interval value itself is always a bound parameter.
+_BOARD_INSERT = (
+    "INSERT INTO entity_leaderboard "
+    "(facet_kind, role, window_key, rank, facet_value, kill_count, computed_at) "
+    "SELECT facet_kind, role, %(window)s, rank, facet_value, kill_count, now() "
+    "FROM ("
+    "SELECT facet_kind, role, facet_value, SUM(kill_count) AS kill_count, "
+    "ROW_NUMBER() OVER (PARTITION BY facet_kind, role "
+    "ORDER BY SUM(kill_count) DESC, facet_value) AS rank "
+    "FROM entity_kills_daily "
+    "WHERE facet_kind = ANY(%(kinds)s) AND role = ANY(%(roles)s){day_predicate} "
+    "GROUP BY facet_kind, role, facet_value"
+    ") ranked WHERE rank <= %(top_n)s"
+)
+_DAY_PREDICATE = " AND day > CURRENT_DATE - %(interval)s::interval"
+
+
+def compute_board(conn, window_key: str) -> int:
+    """Rewrite one window's boards for every (kind, role) in a single
+    transaction, so readers never see a partial board. Returns rows written."""
+    interval = WINDOWS[window_key]  # KeyError on an unknown window is a bug
+    sql = _BOARD_INSERT.format(day_predicate=_DAY_PREDICATE if interval else "")
+    params = {
+        "window": window_key,
+        "kinds": KINDS,
+        "roles": ROLES,
+        "interval": interval,
+        "top_n": config.leaderboard.top_n,
+    }
+    try:
+        with get_cursor(conn) as cursor:
+            cursor.execute(_BOARD_DELETE, params)
+            cursor.execute(sql, params)
+            written = cursor.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return written
+
+
+def compute_boards(conn, windows: list[str]) -> bool:
+    """Refresh-step body for a set of windows. Returns False (skipped) when
+    there is no rollup watermark — a partially built rollup must never produce
+    boards. Each window is its own transaction; a failing window is logged and
+    counted and the rest still run; raises at the end if any failed."""
+    if read_watermark(conn) is None:
+        logger.info("No entity rollup watermark; skipping leaderboards.")
+        return False
+    failed: list[str] = []
+    for window_key in windows:
+        start = time.monotonic()
+        try:
+            written = compute_board(conn, window_key)
+        except Exception as e:
+            failed.append(window_key)
+            metrics.leaderboard_computations.labels(window_key, "failed").inc()
+            logger.error("Leaderboard %s failed: %s", window_key, e, exc_info=True)
+            continue
+        elapsed = time.monotonic() - start
+        metrics.leaderboard_computations.labels(window_key, "success").inc()
+        metrics.leaderboard_compute_seconds.labels(window_key).observe(elapsed)
+        metrics.leaderboard_last_success_timestamp.labels(
+            window_key
+        ).set_to_current_time()
+        logger.info("Leaderboard %s: %d rows in %.1fs.", window_key, written, elapsed)
+    if failed:
+        raise RuntimeError(f"leaderboard windows failed: {', '.join(failed)}")
+    return True

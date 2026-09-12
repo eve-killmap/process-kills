@@ -166,3 +166,31 @@ def test_interval_kill_mvs_removed():
         "mv_kills_per_system_1y",
     ):
         assert mv not in SCHEMA
+
+
+def test_entity_leaderboard_tables_present():
+    for table in ("entity_kills_daily", "entity_leaderboard", "rollup_state"):
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in SCHEMA
+    # Rollup: single covering, day-leading PK (no second index on this table).
+    assert (
+        "PRIMARY KEY (facet_kind, role, day, facet_value) INCLUDE (kill_count)"
+        in _SCHEMA_NORM
+    )
+    rollup_block = SCHEMA[
+        SCHEMA.index("CREATE TABLE IF NOT EXISTS entity_kills_daily") : SCHEMA.index(
+            "CREATE TABLE IF NOT EXISTS entity_leaderboard"
+        )
+    ]
+    assert "CREATE INDEX" not in rollup_block
+    # Board PK.
+    assert "PRIMARY KEY (facet_kind, role, window_key, rank)" in _SCHEMA_NORM
+    # Today's row churns every fast cycle; the default scale factor would never vacuum.
+    assert re.search(
+        r"ALTER TABLE entity_kills_daily SET \(\s*"
+        r"autovacuum_vacuum_scale_factor = 0\.01,\s*"
+        r"autovacuum_analyze_scale_factor = 0\.005\s*\);",
+        _SCHEMA_NORM,
+    )
+    # Watermark cursor.
+    assert "name TEXT PRIMARY KEY" in _SCHEMA_NORM
+    assert "watermark TIMESTAMPTZ NOT NULL" in _SCHEMA_NORM

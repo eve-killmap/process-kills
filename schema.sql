@@ -299,3 +299,48 @@ GROUP BY alliance_id;
 -- Unique index required for REFRESH MATERIALIZED VIEW CONCURRENTLY + point reads.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_member_count_alliance
     ON mv_alliance_member_count (alliance_id);
+
+-- Entity leaderboards: a per-entity daily kill rollup derived from kill_facets
+-- (kinds 1-6), full history from BEGIN_DATE, plus the precomputed top-N boards.
+-- Maintained incrementally by leaderboard.py: dirty days come from
+-- kills.inserted_time vs. rollup_state.watermark and are recomputed whole. The
+-- one-time historical build is a local sql/ script looping the same primitive.
+-- Design: docs/superpowers/specs/2026-09-12-entity-leaderboards-design.md
+
+CREATE TABLE IF NOT EXISTS entity_kills_daily (
+    facet_kind  SMALLINT NOT NULL,   -- 1 char 2 corp 3 alliance 4 faction 5 ship 6 weapon
+    role        SMALLINT NOT NULL,   -- 0 victim 1 attacker
+    day         DATE     NOT NULL,   -- (killmail_time AT TIME ZONE 'UTC')::date
+    facet_value BIGINT   NOT NULL,
+    kill_count  INTEGER  NOT NULL,
+    -- Single covering, day-leading PK: every read is (kind, role) + a day range
+    -- (windowed boards) or the whole (kind, role) slice (all-time), index-only.
+    PRIMARY KEY (facet_kind, role, day, facet_value) INCLUDE (kill_count)
+);
+
+-- Today's row is recomputed every fast cycle (~26k dead tuples/cycle); the
+-- default 20% scale factor on ~150M rows would never trigger a vacuum.
+ALTER TABLE entity_kills_daily SET (
+    autovacuum_vacuum_scale_factor  = 0.01,
+    autovacuum_analyze_scale_factor = 0.005
+);
+
+-- Precomputed top-N boards; the backend reads this table only. IDs only (names
+-- come from the reference tables). Boards may be short or empty.
+CREATE TABLE IF NOT EXISTS entity_leaderboard (
+    facet_kind  SMALLINT    NOT NULL,
+    role        SMALLINT    NOT NULL,
+    window_key  TEXT        NOT NULL,   -- day | week | month | six_months | year | all
+    rank        SMALLINT    NOT NULL,   -- 1..top_n
+    facet_value BIGINT      NOT NULL,
+    kill_count  BIGINT      NOT NULL,
+    computed_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (facet_kind, role, window_key, rank)
+);
+
+-- Incremental-rollup cursors, one row per rollup. (The local backfill parks a
+-- transient '<name>_backfill_started' row here while it runs.)
+CREATE TABLE IF NOT EXISTS rollup_state (
+    name      TEXT        PRIMARY KEY,  -- 'entity_kills_daily'
+    watermark TIMESTAMPTZ NOT NULL
+);

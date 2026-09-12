@@ -416,3 +416,20 @@ def test_corporations_interval_min_validated(tmp_path):
     yaml_path = write_yaml(tmp_path, "corporations:\n  interval: 0\n")
     with pytest.raises(ConfigError):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leaderboard_defaults_and_override(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.leaderboard.enabled is True
+    assert cfg.leaderboard.top_n == 25
+
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  enabled: false\n  top_n: 100\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.leaderboard.enabled is False
+    assert cfg.leaderboard.top_n == 100
+
+
+def test_leaderboard_top_n_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  top_n: 0\n")
+    with pytest.raises(ConfigError, match="leaderboard.top_n"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

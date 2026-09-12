@@ -61,9 +61,10 @@ refresh:
   # Fast materialized views refresh every this many minutes, wall-clock aligned
   # (e.g. 30 -> :00 and :30 UTC each hour; 360 -> 00:00/06:00/12:00/18:00).
   mv_refresh_interval_minutes: 360
-  # work_mem for the dedicated MV-refresh connection only, so REFRESH ... CONCURRENTLY
-  # sorts/diffs in memory instead of spilling to disk. Separate from ingestion
-  # connections, so a large value here is safe.
+  # work_mem for the dedicated refresh connections only, so REFRESH ... CONCURRENTLY
+  # sorts/diffs in memory instead of spilling to disk. With leaderboards enabled the
+  # weekly all-time board hash-aggregates the whole rollup; 2GB is recommended then.
+  # Separate from ingestion connections, so a large value here is safe.
   work_mem: 512MB
 
 streaming:
@@ -141,3 +142,11 @@ heartbeat:
   # disables it.
   downtime_hour: 11
   downtime_minutes: 20
+
+# Entity leaderboards (top characters/corps/alliances/factions/ships/weapons).
+# The rollup and boards run on the existing fast/slow refresh cadences. Until
+# the one-time historical build (a local sql/ script) has set the rollup
+# watermark, the steps skip and log; nothing here triggers that build.
+leaderboard:
+  enabled: true
+  top_n: 25             # rows kept per (kind, role, window) board

@@ -206,6 +206,12 @@ class HeartbeatConfig:
 
 
 @dataclass(frozen=True)
+class LeaderboardConfig:
+    enabled: bool
+    top_n: int
+
+
+@dataclass(frozen=True)
 class Paths:
     base_dir: Path
     data_dir: Path
@@ -232,6 +238,7 @@ class Config:
     factions: FactionsConfig
     facets: FacetsConfig
     heartbeat: HeartbeatConfig
+    leaderboard: LeaderboardConfig
     user_agent: str
     database_url: str | None
     redis_url: str
@@ -330,6 +337,7 @@ def load_config(
     factions_cfg = _section(data, "factions")
     facets_cfg = _section(data, "facets")
     heartbeat_cfg = _section(data, "heartbeat")
+    leaderboard_cfg = _section(data, "leaderboard")
 
     level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
     if level not in VALID_LOG_LEVELS:
@@ -555,6 +563,13 @@ def load_config(
         ),
     )
 
+    leaderboard_config = LeaderboardConfig(
+        enabled=bool(leaderboard_cfg.get("enabled", True)),
+        top_n=_as_int(
+            leaderboard_cfg.get("top_n", 25), "leaderboard.top_n", minimum=1
+        ),
+    )
+
     data_dir = Path(env.get("DATA_DIR") or base_dir / "data")
     paths = Paths(base_dir=base_dir, data_dir=data_dir)
 
@@ -578,6 +593,7 @@ def load_config(
         factions=factions_config,
         facets=facets_config,
         heartbeat=heartbeat_config,
+        leaderboard=leaderboard_config,
         user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
         database_url=env.get("DATABASE_URL") or None,
         redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,

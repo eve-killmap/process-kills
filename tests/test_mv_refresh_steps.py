@@ -84,6 +84,121 @@ def test_run_cycle_without_redis_publishes_nothing(monkeypatch):
     assert failed is False
 
 
+def test_run_cycle_stops_between_steps_when_shutdown_requested(monkeypatch):
+    ran = []
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 1  # false before the first step, true afterwards
+
+    steps = [
+        RefreshStep("a", lambda: ran.append("a") or True, []),
+        RefreshStep("b", lambda: ran.append("b") or True, []),
+    ]
+    failed = asyncio.run(mv_refresh._run_cycle(steps, "fast", redis=None, stop=stop))
+    assert ran == ["a"]  # b never launched
+    assert failed is False
+
+
+def test_run_cycle_records_nothing_when_shutdown_precedes_the_first_step():
+    ok = {"cadence": "slow", "result": "success"}
+    before = _val("eve_killmap_mv_refresh_runs_total", ok)
+    ts_before = _val("eve_killmap_mv_refresh_last_success_timestamp_seconds", {"cadence": "slow"})
+    steps = [RefreshStep("a", lambda: True, [])]
+    failed = asyncio.run(mv_refresh._run_cycle(steps, "slow", redis=None, stop=lambda: True))
+    assert failed is False
+    # no step ran: neither a success nor a fresh last-success timestamp
+    assert _val("eve_killmap_mv_refresh_runs_total", ok) == before
+    assert _val("eve_killmap_mv_refresh_last_success_timestamp_seconds", {"cadence": "slow"}) == ts_before
+
+
+def test_slow_steps_thread_the_stop_check_into_both_steps(monkeypatch):
+    import contextlib
+
+    class _Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(sql)
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __init__(self):
+            self.cur = _Cur()
+            self.autocommit = False
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            pass
+
+    conns = []
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        c = _Conn()
+        conns.append(c)
+        yield c
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+    seen = {}
+    monkeypatch.setattr(
+        mv_refresh.leaderboard,
+        "compute_boards",
+        lambda conn, w, should_stop=None: (seen.setdefault("boards_stop", should_stop), True)[1],
+    )
+    _pin_leaderboard(monkeypatch, True)
+    marker = lambda: False  # noqa: E731
+
+    leaderboards, mv = mv_refresh._slow_steps(marker)
+    assert leaderboards.run() is True
+    assert seen["boards_stop"] is marker
+    # the MV step polls the same predicate between views; with it already true
+    # nothing is refreshed and the step reports "skipped"
+    assert mv_refresh._refresh_views(["mv_a", "mv_b"], stop=lambda: True) is False
+    assert not any("REFRESH" in s for s in conns[-1].cur.sql)
+
+
+def test_fast_steps_pass_the_stop_check_into_the_rollups_step(monkeypatch):
+    import contextlib
+
+    class _Conn:
+        def cursor(self):
+            return contextlib.nullcontext(type("C", (), {"execute": lambda *a, **k: None})())
+
+        def commit(self):
+            pass
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        yield _Conn()
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+    seen = {}
+    monkeypatch.setattr(
+        mv_refresh.rollups,
+        "roll_dirty_days",
+        lambda conn, should_stop=None: seen.setdefault("stop", should_stop) or True,
+    )
+    _pin_leaderboard(monkeypatch, True)
+    marker = lambda: False  # noqa: E731 — identity is what we check
+
+    mv_refresh._fast_steps(marker)[0].run()
+
+    assert seen["stop"] is marker
+
+
 def test_run_cycle_records_cycle_level_metrics(monkeypatch):
     ok = {"cadence": "fast", "result": "success"}
     bad = {"cadence": "fast", "result": "failed"}
@@ -103,8 +218,9 @@ def test_run_cycle_records_cycle_level_metrics(monkeypatch):
 def test_fast_steps_order_and_targets(monkeypatch):
     _pin_leaderboard(monkeypatch, True)
     steps = mv_refresh._fast_steps()
-    assert [s.name for s in steps] == ["entity_rollup", "leaderboards", "mv_refresh"]
-    assert steps[0].invalidation == []
+    assert [s.name for s in steps] == ["rollups", "leaderboards", "mv_refresh"]
+    # the rollups step rewrites system_kills_daily, which the system panels read
+    assert steps[0].invalidation == mv_refresh._FAST_INVALIDATION
     assert steps[1].invalidation == ["leaderboards"]
     assert steps[2].invalidation == mv_refresh._FAST_INVALIDATION
 
@@ -119,7 +235,8 @@ def test_slow_steps_order_and_targets(monkeypatch):
 
 def test_leaderboard_steps_absent_when_disabled(monkeypatch):
     _pin_leaderboard(monkeypatch, False)
-    assert [s.name for s in mv_refresh._fast_steps()] == ["mv_refresh"]
+    # the toggle gates only the boards; the rollups always run
+    assert [s.name for s in mv_refresh._fast_steps()] == ["rollups", "mv_refresh"]
     assert [s.name for s in mv_refresh._slow_steps()] == ["mv_refresh"]
 
 
@@ -166,8 +283,16 @@ def test_step_bodies_use_their_own_configured_connection(monkeypatch):
 
     monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
     seen = {}
-    monkeypatch.setattr(mv_refresh.leaderboard, "roll_dirty_days", lambda conn: seen.setdefault("roll", conn) and True)
-    monkeypatch.setattr(mv_refresh.leaderboard, "compute_boards", lambda conn, w: seen.setdefault("boards", (conn, w)) and True)
+    monkeypatch.setattr(
+        mv_refresh.rollups,
+        "roll_dirty_days",
+        lambda conn, should_stop=None: seen.setdefault("roll", conn) and True,
+    )
+    monkeypatch.setattr(
+        mv_refresh.leaderboard,
+        "compute_boards",
+        lambda conn, w, should_stop=None: seen.setdefault("boards", (conn, w)) and True,
+    )
     _pin_leaderboard(monkeypatch, True)
 
     fast = mv_refresh._fast_steps()

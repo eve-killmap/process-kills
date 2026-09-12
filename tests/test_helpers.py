@@ -80,23 +80,12 @@ def test_mv_alliance_member_count_in_fast_views():
     assert "mv_alliance_member_count" in _FAST_VIEWS
 
 
-def test_kills_per_system_daily_in_fast_views():
+def test_fast_views_exclude_the_daily_rollup():
     from mv_refresh import _FAST_VIEWS
 
-    assert "mv_kills_per_system_daily" in _FAST_VIEWS
-    for mv in (
-        "mv_kills_per_system_24h",
-        "mv_kills_per_system_7d",
-        "mv_kills_per_system_30d",
-        "mv_kills_per_system_6m",
-        "mv_kills_per_system_1y",
-    ):
-        assert mv not in _FAST_VIEWS
-    assert _FAST_VIEWS == [
-        "mv_kills_per_system",
-        "mv_kills_per_system_daily",
-        "mv_alliance_member_count",
-    ]
+    # system_kills_daily is a table rolled by the rollups step, not a refreshed MV.
+    assert "mv_kills_per_system_daily" not in _FAST_VIEWS
+    assert _FAST_VIEWS == ["mv_kills_per_system", "mv_alliance_member_count"]
 
 
 def test_fast_invalidation_targets():

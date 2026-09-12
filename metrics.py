@@ -194,7 +194,7 @@ refresh_step_runs = Counter(
         "cadence",
         "step",
         "result",
-    ],  # step: mv_refresh|entity_rollup|leaderboards  result: success|failed|skipped
+    ],  # step: mv_refresh|rollups|leaderboards  result: success|failed|skipped
 )
 refresh_step_duration_seconds = Histogram(
     "eve_killmap_refresh_step_duration_seconds",
@@ -204,15 +204,16 @@ refresh_step_duration_seconds = Histogram(
 )
 
 
-# Entity leaderboards
+# Daily rollups and entity leaderboards
 
-entity_rollup_days_rolled = Counter(
-    "eve_killmap_entity_rollup_days_rolled",
-    "UTC days recomputed in entity_kills_daily (steady state ~1-2 per fast cycle).",
+rollup_days_rolled = Counter(
+    "eve_killmap_rollup_days_rolled",
+    "UTC days recomputed in entity_kills_daily + system_kills_daily "
+    "(steady state ~1-2 per fast cycle).",
 )
-entity_rollup_watermark_timestamp = Gauge(
-    "eve_killmap_entity_rollup_watermark_timestamp_seconds",
-    "Unix time of the entity rollup watermark (now - this = rollup lag).",
+rollup_watermark_timestamp = Gauge(
+    "eve_killmap_rollup_watermark_timestamp_seconds",
+    "Unix time of the shared rollup watermark (now - this = rollup lag).",
 )
 leaderboard_computations = Counter(
     "eve_killmap_leaderboard_computations",
@@ -278,7 +279,7 @@ errors = Counter(
     "Unhandled errors caught in a scheduler/loop, by component.",
     [
         "component"
-    ],  # live|crosscheck|recheck|mv_refresh|entity_rollup|leaderboards|entities|wars|factions|entity_backlog|facets|corporations|zkb
+    ],  # live|crosscheck|recheck|mv_refresh|rollups|leaderboards|entities|wars|factions|entity_backlog|facets|corporations|zkb
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",

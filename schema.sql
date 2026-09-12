@@ -18,13 +18,29 @@ CREATE TABLE IF NOT EXISTS kills (
     inserted_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_kills_time ON kills (killmail_time);
+-- Covering: the per-day rollups (rollups.py) read a day's killmail_id range and
+-- per-system counts from this index alone, without touching the kills heap.
+CREATE INDEX IF NOT EXISTS idx_kills_time_covering
+    ON kills (killmail_time) INCLUDE (killmail_id, solar_system_id);
 CREATE INDEX IF NOT EXISTS idx_kills_system_time_covering
     ON kills (solar_system_id, killmail_time)
     INCLUDE (killmail_id, position_x, position_y, position_z, victim_ship_type_id);
 CREATE INDEX IF NOT EXISTS idx_kills_system_inserted_covering
     ON kills (solar_system_id, inserted_time)
     INCLUDE (killmail_id, position_x, position_y, position_z, killmail_time, victim_ship_type_id);
+
+-- Autovacuum for the big insert-only tables (kills, kill_attackers, zkb_metadata,
+-- kill_facets): the default percentage thresholds scale with table size, so at
+-- 10^8-10^9 rows an ANALYZE or insert-driven VACUUM would run every few months
+-- to years. Absolute thresholds ≈ 1-2 weeks of inserts keep statistics current
+-- and the visibility map set for the covering indexes' index-only scans. Each
+-- vacuum only touches the pages written since the last one, so they stay cheap.
+ALTER TABLE kills SET (
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_insert_threshold    = 250000,
+    autovacuum_analyze_scale_factor       = 0,
+    autovacuum_analyze_threshold          = 250000
+);
 
 -- Attackers table to store information about attackers in each killmail
 
@@ -45,6 +61,13 @@ CREATE TABLE IF NOT EXISTS kill_attackers (
 
 CREATE INDEX IF NOT EXISTS idx_attackers_killmail ON kill_attackers (killmail_id);
 
+ALTER TABLE kill_attackers SET (
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_insert_threshold    = 2000000,
+    autovacuum_analyze_scale_factor       = 0,
+    autovacuum_analyze_threshold          = 2000000
+);
+
 -- zKillboard per-kill metadata (values/flags/labels)
 
 CREATE TABLE IF NOT EXISTS zkb_metadata (
@@ -64,6 +87,13 @@ CREATE TABLE IF NOT EXISTS zkb_metadata (
 
 CREATE INDEX IF NOT EXISTS idx_zkb_system_time ON zkb_metadata (solar_system_id, killmail_time);
 CREATE INDEX IF NOT EXISTS idx_zkb_labels ON zkb_metadata USING gin (labels);
+
+ALTER TABLE zkb_metadata SET (
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_insert_threshold    = 250000,
+    autovacuum_analyze_scale_factor       = 0,
+    autovacuum_analyze_threshold          = 250000
+);
 
 -- Table to store killmails without position data
 
@@ -96,38 +126,45 @@ CREATE TABLE IF NOT EXISTS live_state (
     sequence BIGINT NOT NULL
 );
 
--- Materialized view for kills per system, unordered (all-time)
+-- Per-system daily kill rollup: the backend range-sums this over a day-aligned
+-- window (system-kills, rankings presets, global-kills histogram). A plain table
+-- maintained incrementally by rollups.py (one UTC day recomputed at a time, dirty
+-- days derived from kills.inserted_time), not a materialized view: recomputing
+-- ~100M kills every fast cycle cost ~5 CPU-hours/day.
+
+CREATE TABLE IF NOT EXISTS system_kills_daily (
+    solar_system_id INTEGER NOT NULL,
+    day             DATE    NOT NULL,   -- killmail_time::date in a UTC session (rollups.py pins TimeZone)
+    kill_count      INTEGER NOT NULL,
+    -- INCLUDE (kill_count) makes the global-kills per-map id-range scan index-only.
+    PRIMARY KEY (solar_system_id, day) INCLUDE (kill_count)
+);
+
+-- Day-range windows (system-kills, rankings presets) served index-only; also the
+-- per-day DELETE in rollups.roll_system_day.
+CREATE INDEX IF NOT EXISTS idx_system_kills_daily_day
+    ON system_kills_daily (day) INCLUDE (solar_system_id, kill_count);
+
+-- Today's rows are deleted and reinserted every fast cycle; with the default 20%
+-- scale factor the hottest pages (today, yesterday — what the system panels read)
+-- would stay not-all-visible for days, defeating the index-only scans above.
+ALTER TABLE system_kills_daily SET (
+    autovacuum_vacuum_scale_factor  = 0.01,
+    autovacuum_analyze_scale_factor = 0.005
+);
+
+-- All-time kills per system: an aggregate over the daily rollup (~3M rows), not
+-- over kills (~100M), so its CONCURRENTLY refresh is ~1 s. Must follow the table.
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system AS
 SELECT
     solar_system_id,
-    COUNT(*) AS kill_count
-FROM kills
+    SUM(kill_count) AS kill_count
+FROM system_kills_daily
 GROUP BY solar_system_id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_system
     ON mv_kills_per_system (solar_system_id);
-
--- Per-system daily kill rollup: the backend range-sums this over a day-aligned
--- window (system-kills, rankings presets, global-kills histogram). Replaces the
--- five fixed-interval MVs; one grouped scan of kills per refresh instead of five.
-
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_kills_per_system_daily AS
-SELECT
-    solar_system_id,
-    (killmail_time AT TIME ZONE 'UTC')::date AS day,
-    COUNT(*) AS kill_count
-FROM kills
-GROUP BY solar_system_id, (killmail_time AT TIME ZONE 'UTC')::date;
-
--- Unique index is required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
--- INCLUDE (kill_count) makes the global-kills per-map id-range scan index-only.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_kills_per_system_daily_sys_day
-    ON mv_kills_per_system_daily (solar_system_id, day) INCLUDE (kill_count);
-
--- Day-range windows (system-kills, rankings presets) served index-only.
-CREATE INDEX IF NOT EXISTS idx_mv_kills_per_system_daily_day
-    ON mv_kills_per_system_daily (day) INCLUDE (solar_system_id, kill_count);
 
 -- Materialized view for farthest kill
 
@@ -240,6 +277,19 @@ CREATE TABLE IF NOT EXISTS kill_facets (
 CREATE INDEX IF NOT EXISTS idx_facet_kill
     ON kill_facets (killmail_id, facet_kind, facet_value, role);
 
+ALTER TABLE kill_facets SET (
+    autovacuum_vacuum_insert_scale_factor = 0,
+    autovacuum_vacuum_insert_threshold    = 5000000,
+    autovacuum_analyze_scale_factor       = 0,
+    autovacuum_analyze_threshold          = 5000000
+);
+
+-- ANALYZE's 30k-row sample underestimates killmail_id's distinct count ~3x on a
+-- 10^9-row table, which mis-costs every join through idx_facet_kill. Pin it to
+-- the structural ratio: one kill per ~17 facet rows (kills / kill_facets rows).
+-- Re-derive if the average number of facets per kill changes materially.
+ALTER TABLE kill_facets ALTER COLUMN killmail_id SET (n_distinct = -0.06);
+
 -- Trigram search indexes for the filter-builder autocomplete over the reference
 -- tables (id-indexed only otherwise).
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
@@ -310,7 +360,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_alliance_member_count_alliance
 CREATE TABLE IF NOT EXISTS entity_kills_daily (
     facet_kind  SMALLINT NOT NULL,   -- 1 char 2 corp 3 alliance 4 faction 5 ship 6 weapon
     role        SMALLINT NOT NULL,   -- 0 victim 1 attacker
-    day         DATE     NOT NULL,   -- (killmail_time AT TIME ZONE 'UTC')::date
+    day         DATE     NOT NULL,   -- killmail_time::date in a UTC session (rollups.py pins TimeZone)
     facet_value BIGINT   NOT NULL,
     kill_count  INTEGER  NOT NULL,
     -- Single covering, day-leading PK: every read is (kind, role) + a day range

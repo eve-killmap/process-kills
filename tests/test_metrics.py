@@ -85,9 +85,9 @@ def test_zkb_written_counter_increments():
 
 
 def test_refresh_step_runs_counter_is_labeled():
-    labels = {"cadence": "fast", "step": "entity_rollup", "result": "skipped"}
+    labels = {"cadence": "fast", "step": "rollups", "result": "skipped"}
     before = _val("eve_killmap_refresh_step_runs_total", labels) or 0.0
-    metrics.refresh_step_runs.labels("fast", "entity_rollup", "skipped").inc()
+    metrics.refresh_step_runs.labels("fast", "rollups", "skipped").inc()
     assert _val("eve_killmap_refresh_step_runs_total", labels) == before + 1
 
 
@@ -98,12 +98,15 @@ def test_refresh_step_duration_histogram_is_labeled():
     assert _val("eve_killmap_refresh_step_duration_seconds_count", labels) == before + 1
 
 
-def test_entity_rollup_metrics():
-    before = _val("eve_killmap_entity_rollup_days_rolled_total") or 0.0
-    metrics.entity_rollup_days_rolled.inc()
-    assert _val("eve_killmap_entity_rollup_days_rolled_total") == before + 1
-    metrics.entity_rollup_watermark_timestamp.set(1_700_000_000)
-    assert _val("eve_killmap_entity_rollup_watermark_timestamp_seconds") == 1_700_000_000
+def test_rollup_metrics():
+    before = _val("eve_killmap_rollup_days_rolled_total") or 0.0
+    metrics.rollup_days_rolled.inc()
+    assert _val("eve_killmap_rollup_days_rolled_total") == before + 1
+    metrics.rollup_watermark_timestamp.set(1_700_000_000)
+    assert _val("eve_killmap_rollup_watermark_timestamp_seconds") == 1_700_000_000
+    # the pre-rename names must be gone (stale series would mislead the dashboard)
+    assert not hasattr(metrics, "entity_rollup_days_rolled")
+    assert not hasattr(metrics, "entity_rollup_watermark_timestamp")
 
 
 def test_leaderboard_metrics_are_labeled_by_window():

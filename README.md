@@ -154,24 +154,35 @@ load window. It's large (~1B rows) and I/O-heavy; run it in a low-traffic window
 
 ## Entity leaderboards
 
-Three tables support per-entity leaderboards (top characters, corps, alliances,
-factions, ships, weapons). `entity_kills_daily` is a per-entity daily rollup of
-`kill_facets` (kinds 1-6), maintained incrementally from `kills.inserted_time`
-against a watermark in `rollup_state`. `entity_leaderboard` holds the
-precomputed top-N boards per `(facet_kind, role, window_key)` — the only table
-the backend reads. The rollup and board steps run as steps on the existing
-fast/slow refresh cadences (`mv_refresh.py`), gated by `leaderboard.enabled`;
-until the watermark exists, both steps skip and log.
+Two daily rollups are maintained incrementally by `rollups.py`: dirty UTC days
+are derived from `kills.inserted_time` against a shared watermark in
+`rollup_state`, and each dirty day is recomputed whole. `system_kills_daily`
+(`solar_system_id, day → kill_count`) feeds the backend's top-systems,
+system-kills and global-kills panels, and `mv_kills_per_system` (all-time) is a
+cheap aggregate over it. `entity_kills_daily` is the per-entity rollup of
+`kill_facets` (kinds 1-6) behind the leaderboards (top characters, corps,
+alliances, factions, ships, weapons); `entity_leaderboard` holds the precomputed
+top-N boards per `(facet_kind, role, window_key)` — the only leaderboard table
+the backend reads. Both run as steps on the existing fast/slow refresh cadences
+(`mv_refresh.py`); the rollups always run, the boards only with
+`leaderboard.enabled`; until the watermark exists, both steps skip and log.
+
+**Timezone policy:** a rollup "day" is `killmail_time::date` with no explicit
+zone, so every session that reads or writes these tables must run with
+`TimeZone = UTC`. The service pins it on its refresh connection; the backend
+must pin it too; and any maintenance SQL run by hand (builds, the checks below)
+must start with `SET timezone = 'UTC';`.
 
 **Backfilling history** is a one-time operator-run build, not a service task:
-one `INSERT … SELECT … GROUP BY` over `kill_facets` fills the rollup in a single
-sequential pass, then a local completion script (not part of the published
+two hand-run `INSERT … SELECT … GROUP BY` statements — `kills` →
+`system_kills_daily` and `kill_facets` → `entity_kills_daily`, each one
+sequential pass — then a local completion script (not part of the published
 source, like the facets backfill) writes the boards and sets the watermark.
-Before running it, check the plan:
+Before running them, check the plan:
 
 ```sql
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT DISTINCT (killmail_time AT TIME ZONE 'UTC')::date
+SELECT DISTINCT killmail_time::date
   FROM kills WHERE inserted_time > now() - interval '1 hour';
 ```
 
@@ -186,7 +197,7 @@ SELECT day, e.victim_ships, s.kills
   FROM (SELECT day, SUM(kill_count) AS victim_ships
           FROM entity_kills_daily WHERE facet_kind = 5 AND role = 0 GROUP BY day) e
   FULL JOIN (SELECT day, SUM(kill_count) AS kills
-               FROM mv_kills_per_system_daily GROUP BY day) s USING (day)
+               FROM system_kills_daily GROUP BY day) s USING (day)
  WHERE e.victim_ships IS DISTINCT FROM s.kills AND day < CURRENT_DATE
  ORDER BY day;
 ```

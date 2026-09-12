@@ -163,10 +163,11 @@ the backend reads. The rollup and board steps run as steps on the existing
 fast/slow refresh cadences (`mv_refresh.py`), gated by `leaderboard.enabled`;
 until the watermark exists, both steps skip and log.
 
-**Backfilling history** is a one-time operator-run build, not a service task: a
-local maintenance script (not part of the published source, like the facets
-backfill) loops `leaderboard.roll_day` over every day since 2015-11-03 and
-sets the watermark on completion. Before running it, check the plan:
+**Backfilling history** is a one-time operator-run build, not a service task:
+one `INSERT … SELECT … GROUP BY` over `kill_facets` fills the rollup in a single
+sequential pass, then a local completion script (not part of the published
+source, like the facets backfill) writes the boards and sets the watermark.
+Before running it, check the plan:
 
 ```sql
 EXPLAIN (ANALYZE, BUFFERS)

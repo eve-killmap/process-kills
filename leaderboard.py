@@ -58,15 +58,26 @@ _ROLL_DELETE = (
     "DELETE FROM entity_kills_daily "
     "WHERE facet_kind = ANY(%(kinds)s) AND role = ANY(%(roles)s) AND day = %(day)s"
 )
-# kills via idx_kills_time, kill_facets via idx_facet_kill (a day's killmail ids
-# are contiguous, so the join reads one contiguous slice of that index). No
-# DISTINCT: collect_facets already dedups per kill.
+# kills via idx_kills_time; kill_facets via ONE contiguous range of idx_facet_kill:
+# killmail ids are monotonic in time, so a day's facet rows are adjacent in that
+# index, and bounding the scan by the day's [min, max] killmail_id makes it a
+# sequential index slice (hot for today) instead of a 1B-row table scan or
+# per-kill random probes — on the production box the planner picks the table
+# scan for the unbounded join. The join to kills stays as the exact day filter
+# (ids at day boundaries interleave). No DISTINCT: collect_facets already dedups
+# per kill.
+_ROLL_BOUNDS = (
+    "SELECT min(killmail_id), max(killmail_id) FROM kills "
+    "WHERE killmail_time >= (%(day)s::timestamp AT TIME ZONE 'UTC') "
+    "AND killmail_time < ((%(day)s + 1)::timestamp AT TIME ZONE 'UTC')"
+)
 _ROLL_INSERT = (
     "INSERT INTO entity_kills_daily (facet_kind, role, day, facet_value, kill_count) "
     "SELECT f.facet_kind, f.role, %(day)s, f.facet_value, COUNT(*) "
     "FROM kills k JOIN kill_facets f USING (killmail_id) "
     "WHERE k.killmail_time >= (%(day)s::timestamp AT TIME ZONE 'UTC') "
     "AND k.killmail_time < ((%(day)s + 1)::timestamp AT TIME ZONE 'UTC') "
+    "AND f.killmail_id BETWEEN %(lo)s AND %(hi)s "
     "AND f.facet_kind = ANY(%(kinds)s) "
     "AND f.role = ANY(%(roles)s) "
     "GROUP BY f.facet_kind, f.role, f.facet_value"
@@ -75,13 +86,18 @@ _ROLL_INSERT = (
 
 def roll_day(conn, day: date) -> int:
     """Recompute one UTC day of entity_kills_daily in a single transaction.
-    Idempotent. Returns the number of rollup rows written."""
+    Idempotent. Returns the number of rollup rows written (0 for a day with no
+    kills, which then also holds no rows)."""
     params = {"kinds": KINDS, "roles": ROLES, "day": day}
     try:
         with get_cursor(conn) as cursor:
             cursor.execute(_ROLL_DELETE, params)
-            cursor.execute(_ROLL_INSERT, params)
-            written = cursor.rowcount
+            cursor.execute(_ROLL_BOUNDS, params)
+            lo, hi = cursor.fetchone()
+            written = 0
+            if lo is not None:
+                cursor.execute(_ROLL_INSERT, {**params, "lo": lo, "hi": hi})
+                written = cursor.rowcount
         conn.commit()
     except Exception:
         conn.rollback()

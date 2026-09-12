@@ -72,22 +72,37 @@ def test_windows_match_backend_intervals():
 
 
 def test_roll_day_deletes_then_inserts_in_one_transaction():
-    conn = _FakeConn([0, 1234])  # DELETE rowcount, INSERT rowcount
+    # DELETE rowcount, the day's [min, max] killmail_id, INSERT rowcount
+    conn = _FakeConn([0, [(100, 200)], 1234])
     day = date(2024, 1, 2)
 
     written = leaderboard.roll_day(conn, day)
 
     assert written == 1234
-    (del_sql, del_params), (ins_sql, ins_params) = conn.cur.executed
+    (del_sql, del_params), (bounds_sql, bounds_params), (ins_sql, ins_params) = (
+        conn.cur.executed
+    )
     assert del_sql.startswith("DELETE FROM entity_kills_daily")
     assert "facet_kind = ANY(%(kinds)s)" in del_sql
     assert "day = %(day)s" in del_sql
+    assert bounds_sql.startswith("SELECT min(killmail_id), max(killmail_id) FROM kills")
     assert ins_sql.startswith("INSERT INTO entity_kills_daily")
     assert "JOIN kill_facets f USING (killmail_id)" in ins_sql
     assert "k.killmail_time >= (%(day)s::timestamp AT TIME ZONE 'UTC')" in ins_sql
     assert "k.killmail_time < ((%(day)s + 1)::timestamp AT TIME ZONE 'UTC')" in ins_sql
+    # one contiguous slice of idx_facet_kill, never a table scan or per-kill probes
+    assert "f.killmail_id BETWEEN %(lo)s AND %(hi)s" in ins_sql
     assert "GROUP BY f.facet_kind, f.role, f.facet_value" in ins_sql
-    assert del_params == ins_params == {"kinds": [1, 2, 3, 4, 5, 6], "roles": [0, 1], "day": day}
+    base = {"kinds": [1, 2, 3, 4, 5, 6], "roles": [0, 1], "day": day}
+    assert del_params == bounds_params == base
+    assert ins_params == {**base, "lo": 100, "hi": 200}
+    assert conn.commits == 1 and conn.rollbacks == 0
+
+
+def test_roll_day_with_no_kills_inserts_nothing():
+    conn = _FakeConn([0, [(None, None)]])  # DELETE rowcount, no kills that day
+    assert leaderboard.roll_day(conn, date(2015, 1, 1)) == 0
+    assert len(conn.cur.executed) == 2  # no INSERT issued
     assert conn.commits == 1 and conn.rollbacks == 0
 
 

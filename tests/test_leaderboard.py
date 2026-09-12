@@ -1,7 +1,10 @@
 # tests/test_leaderboard.py
+import logging
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
+from prometheus_client import REGISTRY
 
 import leaderboard
 
@@ -145,11 +148,6 @@ def test_find_dirty_days_returns_dates_since():
     assert params == (since,)
 
 
-from dataclasses import replace
-
-from prometheus_client import REGISTRY
-
-
 def _metric(name, labels=None):
     return REGISTRY.get_sample_value(name, labels or {}) or 0.0
 
@@ -224,6 +222,28 @@ def test_roll_dirty_days_does_not_advance_watermark_on_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         leaderboard.roll_dirty_days(conn)
     assert advanced == []
+
+
+def test_roll_dirty_days_warns_on_large_dirty_day_list(monkeypatch, caplog):
+    wm = datetime(2024, 1, 2, 10, tzinfo=timezone.utc)
+    t0 = datetime(2024, 1, 2, 12, tzinfo=timezone.utc)
+    conn = _FakeConn()
+    monkeypatch.setattr(leaderboard, "read_watermark", lambda c: wm)
+    monkeypatch.setattr(leaderboard, "db_now", lambda c: t0)
+    days = [date(2024, 1, 1) + timedelta(days=i) for i in range(11)]
+    monkeypatch.setattr(leaderboard, "find_dirty_days", lambda c, since: days)
+    monkeypatch.setattr(leaderboard, "roll_day", lambda c, d: 0)
+    advanced = []
+    monkeypatch.setattr(leaderboard, "set_watermark", lambda c, ts: advanced.append(ts))
+
+    with caplog.at_level(logging.WARNING):
+        assert leaderboard.roll_dirty_days(conn) is True
+
+    assert any(
+        r.levelname == "WARNING" and "11 dirty days" in r.getMessage()
+        for r in caplog.records
+    )
+    assert advanced == [t0]
 
 
 # compute_board ---------------------------------------------------------------
@@ -309,6 +329,7 @@ def test_compute_boards_runs_every_window_and_records_metrics(monkeypatch):
     assert ran == ["day", "week"]
     assert _metric("eve_killmap_leaderboard_computations_total", {"window": "day", "result": "success"}) == before + 1
     assert _metric("eve_killmap_leaderboard_last_success_timestamp_seconds", {"window": "day"}) > 0
+    assert _metric("eve_killmap_leaderboard_rows", {"window": "day"}) == 10
 
 
 def test_compute_boards_continues_past_a_failing_window_then_raises(monkeypatch):

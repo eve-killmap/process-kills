@@ -152,6 +152,49 @@ per-system level. New kills populate it at ingestion when `facets.enabled: true`
 with `facets.enabled: false`, then enable the hook and run a catch-up pass for the
 load window. It's large (~1B rows) and I/O-heavy; run it in a low-traffic window.
 
+## Entity leaderboards
+
+Three tables support per-entity leaderboards (top characters, corps, alliances,
+factions, ships, weapons). `entity_kills_daily` is a per-entity daily rollup of
+`kill_facets` (kinds 1-6), maintained incrementally from `kills.inserted_time`
+against a watermark in `rollup_state`. `entity_leaderboard` holds the
+precomputed top-N boards per `(facet_kind, role, window_key)` — the only table
+the backend reads. The rollup and board steps run as steps on the existing
+fast/slow refresh cadences (`mv_refresh.py`), gated by `leaderboard.enabled`;
+until the watermark exists, both steps skip and log.
+
+**Backfilling history** is a one-time operator-run build, not a service task: a
+local maintenance script (not part of the published source, like the facets
+backfill) loops `leaderboard.roll_day` over every day since 2015-11-03 and
+sets the watermark on completion. Before running it, check the plan:
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT DISTINCT (killmail_time AT TIME ZONE 'UTC')::date
+  FROM kills WHERE inserted_time > now() - interval '1 hour';
+```
+
+Expect an index-only skip scan on `idx_kills_system_inserted_covering`; if it
+seq-scans `kills`, create `idx_kills_inserted ON kills (inserted_time)` with
+`CREATE INDEX CONCURRENTLY` first.
+
+Afterward, check the invariant:
+
+```sql
+SELECT day, e.victim_ships, s.kills
+  FROM (SELECT day, SUM(kill_count) AS victim_ships
+          FROM entity_kills_daily WHERE facet_kind = 5 AND role = 0 GROUP BY day) e
+  FULL JOIN (SELECT day, SUM(kill_count) AS kills
+               FROM mv_kills_per_system_daily GROUP BY day) s USING (day)
+ WHERE e.victim_ships IS DISTINCT FROM s.kills AND day < CURRENT_DATE
+ ORDER BY day;
+```
+
+Expect zero rows. A mismatch means those kills have no `kill_facets` rows (e.g.
+kills promoted by the no-position recheck, which writes no facets); a
+facet-only repair does not touch `kills.inserted_time`, so re-roll those days
+by hand (or reset `rollup_state`) afterwards.
+
 ## Backfill (standalone)
 
 [`backfill.py`](backfill.py) is a **standalone, archival** script that originally

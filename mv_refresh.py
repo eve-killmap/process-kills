@@ -146,7 +146,11 @@ async def _refresh_loop(
         except asyncio.TimeoutError:
             pass
 
-        await _run_cycle(steps(), cadence, redis)
+        try:
+            await _run_cycle(steps(), cadence, redis)
+        except Exception as e:
+            metrics.errors.labels("mv_refresh").inc()
+            logger.error(f"{cadence} refresh cycle crashed: {e}", exc_info=True)
 
     logger.info(f"{cadence} refresh scheduler stopped.")
 
@@ -158,7 +162,7 @@ async def _run_cycle(
     invalidation as soon as it succeeds. Returns True if any step failed."""
     start = time.monotonic()
     failed = False
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     for step in steps:
         outcome = await loop.run_in_executor(None, _run_step, step, cadence)
         if outcome == "failed":

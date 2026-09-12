@@ -566,7 +566,10 @@ def load_config(
     leaderboard_config = LeaderboardConfig(
         enabled=bool(leaderboard_cfg.get("enabled", True)),
         top_n=_as_int(
-            leaderboard_cfg.get("top_n", 25), "leaderboard.top_n", minimum=1
+            leaderboard_cfg.get("top_n", 25),
+            "leaderboard.top_n",
+            minimum=1,
+            maximum=1000,
         ),
     )
 

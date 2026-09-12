@@ -118,3 +118,5 @@ def test_leaderboard_metrics_are_labeled_by_window():
         _val("eve_killmap_leaderboard_last_success_timestamp_seconds", {"window": "all"})
         == 1_700_000_000
     )
+    metrics.leaderboard_rows.labels("year").set(42)
+    assert _val("eve_killmap_leaderboard_rows", {"window": "year"}) == 42

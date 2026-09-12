@@ -230,6 +230,11 @@ leaderboard_last_success_timestamp = Gauge(
     "Unix time of the last successful recomputation, by window.",
     ["window"],
 )
+leaderboard_rows = Gauge(
+    "eve_killmap_leaderboard_rows",
+    "Rows in the last successfully written board, by window (0 = board went empty).",
+    ["window"],
+)
 
 
 # Streaming and Cache Invalidation

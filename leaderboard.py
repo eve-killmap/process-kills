@@ -5,10 +5,12 @@
 Design: docs/superpowers/specs/2026-09-12-entity-leaderboards-design.md
 
 The rollup is maintained by recomputing whole UTC days. Dirty days are derived
-from kills.inserted_time against a watermark (rollup_state), so every insert
-path (live, crosscheck, recheck, backfill, hand-run SQL) is covered without
-any code at the insert sites. Nothing here triggers the historical build; that
-is the local sql/ backfill script, which loops roll_day.
+from kills.inserted_time against a watermark (rollup_state), so every path
+that inserts into kills is covered without any code at the insert sites. A
+facet-only repair (rows added to kill_facets for existing kills) does not
+touch kills.inserted_time; re-roll those days by hand or reset rollup_state.
+Nothing here triggers the historical build; that is the local sql/ backfill
+script, which loops roll_day.
 """
 
 from __future__ import annotations
@@ -27,10 +29,16 @@ KINDS = [1, 2, 3, 4, 5, 6]  # character, corporation, alliance, faction, ship, w
 ROLES = [0, 1]  # victim, attacker
 ROLLUP_NAME = "entity_kills_daily"
 
-# NOW() is transaction-start time and ingestion holds its transaction open
-# across a network wait, so a row can commit with an inserted_time older than a
-# watermark captured meanwhile. Re-scanning this far back is free (idempotent).
+# A kill and its facet rows are committed in separate transactions
+# (insert_kill, then insert_facets), so a roll can land between them and count
+# a kill with no facets; because that kill's inserted_time is only seconds
+# old, the overlap guarantees the day is re-rolled next cycle. 1h also covers
+# any hand-run bulk load whose transaction is shorter than that.
 DIRTY_OVERLAP = timedelta(hours=1)
+# Not a hard cap — see roll_dirty_days for why a cap would stall the
+# watermark. Just the threshold to warn that a cycle is unusually large
+# (steady state is 1-2 dirty days).
+DIRTY_DAYS_WARN = 10
 
 # window_key -> interval literal for `day > CURRENT_DATE - %s::interval` — the
 # backend's top-systems predicate, verbatim, so both panels agree at the edges.
@@ -60,6 +68,7 @@ _ROLL_INSERT = (
     "WHERE k.killmail_time >= (%(day)s::timestamp AT TIME ZONE 'UTC') "
     "AND k.killmail_time < ((%(day)s + 1)::timestamp AT TIME ZONE 'UTC') "
     "AND f.facet_kind = ANY(%(kinds)s) "
+    "AND f.role = ANY(%(roles)s) "
     "GROUP BY f.facet_kind, f.role, f.facet_value"
 )
 
@@ -129,8 +138,14 @@ def roll_dirty_days(conn) -> bool:
             "No entity rollup watermark; run sql/backfill_entity_rollup.py. Skipping."
         )
         return False
+    metrics.entity_rollup_watermark_timestamp.set(watermark.timestamp())
     t0 = db_now(conn)
     days = find_dirty_days(conn, watermark - DIRTY_OVERLAP)
+    if len(days) > DIRTY_DAYS_WARN:
+        logger.warning(
+            "Entity rollup: %d dirty days this cycle (steady state is 1-2); a bulk "
+            "historical load will make this cycle slow.", len(days)
+        )
     for day in days:
         start = time.monotonic()
         written = roll_day(conn, day)
@@ -213,7 +228,12 @@ def compute_boards(conn, windows: list[str]) -> bool:
         metrics.leaderboard_last_success_timestamp.labels(
             window_key
         ).set_to_current_time()
+        metrics.leaderboard_rows.labels(window_key).set(written)
         logger.info("Leaderboard %s: %d rows in %.1fs.", window_key, written, elapsed)
+    # Any failure marks the whole step failed, so the cycle withholds the
+    # leaderboards invalidation even though the other windows were rewritten —
+    # the safe direction: the backend keeps serving its previous (complete)
+    # boards until the next cycle.
     if failed:
         raise RuntimeError(f"leaderboard windows failed: {', '.join(failed)}")
     return True

@@ -180,3 +180,61 @@ def test_step_bodies_use_their_own_configured_connection(monkeypatch):
         assert any("set_config('work_mem'" in s for s in sqls)
         assert any("set_config('TimeZone', 'UTC', false)" in s for s in sqls)
         assert c.commits >= 1  # session settings survive a later rollback
+
+
+# _refresh_views ----------------------------------------------------------------
+
+
+def test_refresh_views_runs_concurrent_refreshes_in_order(monkeypatch):
+    import contextlib
+
+    class _Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append((sql, params))
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __init__(self):
+            self.cur = _Cur()
+            self.commits = 0
+            self.autocommit = False
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            self.commits += 1
+
+    conns = []
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        c = _Conn()
+        conns.append(c)
+        yield c
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+
+    assert mv_refresh._refresh_views(["mv_a", "mv_b"]) is True
+
+    conn = conns[0]
+    assert conn.autocommit is True
+    sqls = [s for s, _ in conn.cur.sql]
+    assert sqls.count("SELECT set_config('work_mem', %s, false)") == 1
+    assert sqls.count("SELECT set_config('TimeZone', 'UTC', false)") == 1
+    refresh_sqls = [s for s in sqls if s.startswith("REFRESH MATERIALIZED VIEW CONCURRENTLY")]
+    assert refresh_sqls == [
+        "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_a",
+        "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_b",
+    ]

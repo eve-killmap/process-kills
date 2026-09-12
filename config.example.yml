@@ -146,7 +146,10 @@ heartbeat:
 # Entity leaderboards (top characters/corps/alliances/factions/ships/weapons).
 # The rollup and boards run on the existing fast/slow refresh cadences. Until
 # the one-time historical build (a local sql/ script) has set the rollup
-# watermark, the steps skip and log; nothing here triggers that build.
+# watermark, the steps skip and log; nothing here triggers that build. Safe to
+# leave enabled before the historical build: both steps check for the
+# watermark and skip until it exists (unlike the facets hook, which writes
+# unconditionally).
 leaderboard:
   enabled: true
   top_n: 25             # rows kept per (kind, role, window) board

@@ -433,3 +433,9 @@ def test_leaderboard_top_n_must_be_positive(tmp_path):
     yaml_path = write_yaml(tmp_path, "leaderboard:\n  top_n: 0\n")
     with pytest.raises(ConfigError, match="leaderboard.top_n"):
         load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leaderboard_top_n_must_fit_smallint(tmp_path):
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  top_n: 1001\n")
+    with pytest.raises(ConfigError, match="leaderboard.top_n"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

@@ -173,19 +173,62 @@ recheck_last_run_timestamp = Gauge(
 
 mv_refresh_runs = Counter(
     "eve_killmap_mv_refresh_runs",
-    "Materialized-view refresh runs, by cadence and result.",
+    "Refresh cycles (all steps of a cadence), by cadence and result.",
     ["cadence", "result"],  # cadence: fast|slow  result: success|failed
 )
 mv_refresh_duration_seconds = Histogram(
     "eve_killmap_mv_refresh_duration_seconds",
-    "Duration of a materialized-view refresh run.",
+    "Duration of a whole refresh cycle (all steps of a cadence).",
     ["cadence"],
     buckets=_DURATION_BUCKETS,
 )
 mv_refresh_last_success_timestamp = Gauge(
     "eve_killmap_mv_refresh_last_success_timestamp_seconds",
-    "Unix time of the last successful materialized-view refresh, by cadence.",
+    "Unix time of the last fully successful refresh cycle, by cadence.",
     ["cadence"],
+)
+refresh_step_runs = Counter(
+    "eve_killmap_refresh_step_runs",
+    "Refresh-cycle steps, by cadence, step and result.",
+    [
+        "cadence",
+        "step",
+        "result",
+    ],  # step: mv_refresh|entity_rollup|leaderboards  result: success|failed|skipped
+)
+refresh_step_duration_seconds = Histogram(
+    "eve_killmap_refresh_step_duration_seconds",
+    "Duration of one refresh-cycle step.",
+    ["cadence", "step"],
+    buckets=_DURATION_BUCKETS,
+)
+
+
+# Entity leaderboards
+
+entity_rollup_days_rolled = Counter(
+    "eve_killmap_entity_rollup_days_rolled",
+    "UTC days recomputed in entity_kills_daily (steady state ~1-2 per fast cycle).",
+)
+entity_rollup_watermark_timestamp = Gauge(
+    "eve_killmap_entity_rollup_watermark_timestamp_seconds",
+    "Unix time of the entity rollup watermark (now - this = rollup lag).",
+)
+leaderboard_computations = Counter(
+    "eve_killmap_leaderboard_computations",
+    "Leaderboard window recomputations, by window and result.",
+    ["window", "result"],  # window: day|week|month|six_months|year|all  result: success|failed
+)
+leaderboard_compute_seconds = Histogram(
+    "eve_killmap_leaderboard_compute_seconds",
+    "Duration of one leaderboard window recomputation.",
+    ["window"],
+    buckets=_DURATION_BUCKETS,
+)
+leaderboard_last_success_timestamp = Gauge(
+    "eve_killmap_leaderboard_last_success_timestamp_seconds",
+    "Unix time of the last successful recomputation, by window.",
+    ["window"],
 )
 
 
@@ -206,7 +249,7 @@ cache_invalidations_published = Counter(
     [
         "target",
         "result",
-    ],  # target: system_rankings|farthest_kill  result: success|failed
+    ],  # target: system_rankings|system_kills|global_kills|farthest_kill|leaderboards  result: success|failed
 )
 redis_connected = Gauge(
     "eve_killmap_redis_connected",
@@ -230,7 +273,7 @@ errors = Counter(
     "Unhandled errors caught in a scheduler/loop, by component.",
     [
         "component"
-    ],  # live|crosscheck|recheck|mv_refresh|entities|wars|factions|entity_backlog|facets|corporations|zkb
+    ],  # live|crosscheck|recheck|mv_refresh|entity_rollup|leaderboards|entities|wars|factions|entity_backlog|facets|corporations|zkb
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",

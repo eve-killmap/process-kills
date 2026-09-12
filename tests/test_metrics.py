@@ -82,3 +82,39 @@ def test_zkb_written_counter_increments():
     before = _val("eve_killmap_zkb_written_total") or 0.0
     metrics.zkb_written.inc()
     assert _val("eve_killmap_zkb_written_total") == before + 1
+
+
+def test_refresh_step_runs_counter_is_labeled():
+    labels = {"cadence": "fast", "step": "entity_rollup", "result": "skipped"}
+    before = _val("eve_killmap_refresh_step_runs_total", labels) or 0.0
+    metrics.refresh_step_runs.labels("fast", "entity_rollup", "skipped").inc()
+    assert _val("eve_killmap_refresh_step_runs_total", labels) == before + 1
+
+
+def test_refresh_step_duration_histogram_is_labeled():
+    labels = {"cadence": "slow", "step": "leaderboards"}
+    before = _val("eve_killmap_refresh_step_duration_seconds_count", labels) or 0.0
+    metrics.refresh_step_duration_seconds.labels("slow", "leaderboards").observe(2.5)
+    assert _val("eve_killmap_refresh_step_duration_seconds_count", labels) == before + 1
+
+
+def test_entity_rollup_metrics():
+    before = _val("eve_killmap_entity_rollup_days_rolled_total") or 0.0
+    metrics.entity_rollup_days_rolled.inc()
+    assert _val("eve_killmap_entity_rollup_days_rolled_total") == before + 1
+    metrics.entity_rollup_watermark_timestamp.set(1_700_000_000)
+    assert _val("eve_killmap_entity_rollup_watermark_timestamp_seconds") == 1_700_000_000
+
+
+def test_leaderboard_metrics_are_labeled_by_window():
+    labels = {"window": "year", "result": "success"}
+    before = _val("eve_killmap_leaderboard_computations_total", labels) or 0.0
+    metrics.leaderboard_computations.labels("year", "success").inc()
+    assert _val("eve_killmap_leaderboard_computations_total", labels) == before + 1
+    metrics.leaderboard_compute_seconds.labels("year").observe(3.0)
+    assert _val("eve_killmap_leaderboard_compute_seconds_count", {"window": "year"}) >= 1
+    metrics.leaderboard_last_success_timestamp.labels("all").set(1_700_000_000)
+    assert (
+        _val("eve_killmap_leaderboard_last_success_timestamp_seconds", {"window": "all"})
+        == 1_700_000_000
+    )

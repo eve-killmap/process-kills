@@ -74,8 +74,7 @@ Secrets are never written to the log.
 ### `config.yml`: non-secret, operator-tweakable settings
 
 Sections: `logging` (level, rotation), `sources` (upstream endpoint URLs), `esi`
-(token-bucket rate limit), `live` (poll/retry delays), `recheck` (the optional
-no-position rechecking pass; see below), `crosscheck` (daily run hour),
+(token-bucket rate limit), `live` (poll/retry delays), `crosscheck` (daily run hour),
 `refresh` (slow/weekly view-refresh day/hour, fast-refresh hours),
 `processing` (batch size), `backfill` (download settings for the standalone
 script), and `metrics` (Prometheus exporter; see below). See
@@ -89,20 +88,19 @@ With `metrics.enabled: true`, the service exposes a Prometheus scrape endpoint a
 Prometheus to pull. It is **disabled by default** (enabling opens a listening
 socket). All metrics are **application-level**: throughput
 (`eve_killmap_kills_processed_total`), freshness (`eve_killmap_killmail_lag_seconds`),
-ESI/zKillboard dependency health, job status (cross-check / recheck / view refresh),
+ESI/zKillboard dependency health, job status (cross-check / rollups / view refresh),
 streaming + cache-invalidation, and an `eve_killmap_errors_total` catch-all,
 plus the client's standard process/GC collectors (Linux only). PostgreSQL
 internals are intentionally left to a separate DB exporter. Metric names are
 prefixed `eve_killmap_`; distinguish services by the Prometheus scrape target's
 `job`/`instance` labels.
 
-## No-position rechecking (optional)
+## Kills without a position
 
-Killmails for NPC/structure deaths often arrive without a position and are stored
-in `kills_no_positions`. With `recheck.enabled: true`, the service periodically
-re-fetches those killmails from ESI in case they have since gained a position,
-promoting any that do into the main `kills` table. This pass is **disabled by
-default**; no-position kills are recorded either way.
+Killmails for NPC/structure deaths often arrive without a position. They are
+recorded in `kills_no_positions` (id, hash, time) so the daily cross-check can
+account for every kill zKillboard reports for a date; nothing re-fetches them.
+Killmails are immutable, so a kill published without a position never gains one.
 
 ## Entity enrichment
 
@@ -202,10 +200,10 @@ SELECT day, e.victim_ships, s.kills
  ORDER BY day;
 ```
 
-Expect zero rows. A mismatch means those kills have no `kill_facets` rows (e.g.
-kills promoted by the no-position recheck, which writes no facets); a
-facet-only repair does not touch `kills.inserted_time`, so re-roll those days
-by hand (or reset `rollup_state`) afterwards.
+Expect zero rows. A mismatch means those kills have no `kill_facets` rows (a
+facet write that failed at ingestion — check `eve_killmap_errors_total{component="facets"}`);
+repair with the facets catch-up, then re-roll those days by hand (or reset
+`rollup_state`) — a facet-only repair does not touch `kills.inserted_time`.
 
 ## Backfill (standalone)
 
@@ -228,6 +226,5 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-The suite covers configuration loading/precedence/validation (including the
-recheck toggle), `parse_kill`'s position handling, and the pure scheduling/date
-helpers. It needs no network access, credentials, or database.
+The suite covers configuration loading/precedence/validation, `parse_kill`'s
+position handling, and the pure scheduling/date helpers. It needs no network access, credentials, or database.

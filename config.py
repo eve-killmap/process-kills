@@ -117,13 +117,6 @@ class LiveConfig:
 
 
 @dataclass(frozen=True)
-class RecheckConfig:
-    enabled: bool
-    interval_seconds: int
-    batch_limit: int
-
-
-@dataclass(frozen=True)
 class CrosscheckConfig:
     hour: int
 
@@ -225,7 +218,6 @@ class Config:
     sources: SourcesConfig
     esi: EsiConfig
     live: LiveConfig
-    recheck: RecheckConfig
     crosscheck: CrosscheckConfig
     refresh: RefreshConfig
     streaming: StreamingConfig
@@ -324,7 +316,6 @@ def load_config(
     src_cfg = _section(data, "sources")
     esi_cfg = _section(data, "esi")
     live_cfg = _section(data, "live")
-    recheck_cfg = _section(data, "recheck")
     cross_cfg = _section(data, "crosscheck")
     refresh_cfg = _section(data, "refresh") or _section(data, "maintenance")
     stream_cfg = _section(data, "streaming")
@@ -410,18 +401,6 @@ def load_config(
         ),
         retry_delay=_as_positive_float(
             live_cfg.get("retry_delay", 6.0), "live.retry_delay"
-        ),
-    )
-
-    recheck_config = RecheckConfig(
-        enabled=bool(recheck_cfg.get("enabled", False)),
-        interval_seconds=_as_int(
-            recheck_cfg.get("interval_seconds", 3600),
-            "recheck.interval_seconds",
-            minimum=1,
-        ),
-        batch_limit=_as_int(
-            recheck_cfg.get("batch_limit", 500), "recheck.batch_limit", minimum=1
         ),
     )
 
@@ -583,7 +562,6 @@ def load_config(
         sources=sources_config,
         esi=esi_config,
         live=live_config,
-        recheck=recheck_config,
         crosscheck=crosscheck_config,
         refresh=refresh_config,
         streaming=streaming_config,

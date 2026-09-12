@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 
 class Priority(IntEnum):
     CROSSCHECK = 0
-    RECHECK = 1
     WAR = 2  # war backfill must never starve crosscheck
 
 

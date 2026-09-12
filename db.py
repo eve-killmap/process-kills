@@ -11,7 +11,7 @@ from psycopg2.extras import execute_values
 
 from config import config, require_database_url
 from entities import EntityIds
-from schema import ProcessedDate, RecheckCandidate
+from schema import ProcessedDate
 
 logger = logging.getLogger(__name__)
 
@@ -283,61 +283,6 @@ def get_existing_killmail_ids(conn: connection, killmail_ids: list[int]) -> set[
     return found
 
 
-def delete_no_position_kill(conn: connection, killmail_id: int) -> None:
-    with get_cursor(conn) as cursor:
-        cursor.execute(
-            "DELETE FROM kills_no_positions WHERE killmail_id = %s", (killmail_id,)
-        )
-    conn.commit()
-
-
-def update_no_position_last_checked(conn: connection, killmail_id: int) -> None:
-    with get_cursor(conn) as cursor:
-        cursor.execute(
-            "UPDATE kills_no_positions SET last_checked = NOW() WHERE killmail_id = %s",
-            (killmail_id,),
-        )
-    conn.commit()
-
-
-def get_recheck_candidates(
-    conn: connection, limit: int = 500
-) -> list[RecheckCandidate]:
-    with get_cursor(conn) as cursor:
-        cursor.execute(
-            """
-            SELECT killmail_id, killmail_hash, killmail_time, last_checked
-            FROM kills_no_positions
-            WHERE killmail_time > NOW() - INTERVAL '3 years'
-            AND (
-                (killmail_time > NOW() - INTERVAL '7 days'
-                    AND last_checked < NOW() - INTERVAL '1 day')
-                OR (killmail_time > NOW() - INTERVAL '30 days'
-                    AND killmail_time <= NOW() - INTERVAL '7 days'
-                    AND last_checked < NOW() - INTERVAL '3 days')
-                OR (killmail_time > NOW() - INTERVAL '180 days'
-                    AND killmail_time <= NOW() - INTERVAL '30 days'
-                    AND last_checked < NOW() - INTERVAL '7 days')
-                OR (killmail_time <= NOW() - INTERVAL '180 days'
-                    AND last_checked < NOW() - INTERVAL '30 days')
-            )
-            ORDER BY killmail_time DESC
-            LIMIT %s
-            """,
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        return [
-            {
-                "killmail_id": row[0],
-                "killmail_hash": row[1],
-                "killmail_time": row[2],
-                "last_checked": row[3],
-            }
-            for row in rows
-        ]
-
-
 def get_processed_date(conn: connection, date: str) -> ProcessedDate | None:
     with get_cursor(conn) as cursor:
         cursor.execute(
@@ -421,20 +366,6 @@ def increment_no_position_kills(conn: connection, date: str) -> None:
                     processed_data.processed_kills + processed_data.no_position_kills + 1
                 ),
                 last_updated = NOW()
-            """,
-            (date,),
-        )
-    conn.commit()
-
-
-def decrement_no_position_kills(conn: connection, date: str) -> None:
-    with get_cursor(conn) as cursor:
-        cursor.execute(
-            """
-            UPDATE processed_data SET
-                no_position_kills = GREATEST(no_position_kills - 1, 0),
-                last_updated = NOW()
-            WHERE date = %s
             """,
             (date,),
         )

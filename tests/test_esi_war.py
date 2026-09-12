@@ -6,7 +6,7 @@ from esi import ESIClient, Priority
 
 def test_priority_war_is_lowest():
     assert Priority.WAR > Priority.CROSSCHECK
-    assert Priority.WAR > Priority.RECHECK
+    assert not hasattr(Priority, "RECHECK")  # no-position rechecking was removed
 
 
 class _FakeResp:

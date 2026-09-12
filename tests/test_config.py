@@ -35,20 +35,16 @@ def test_defaults_used_when_no_yaml_and_empty_env(tmp_path):
     assert cfg.streaming.discard_older_than == 7200
     assert cfg.streaming.invalidate_channel == "cache:invalidate"
     assert cfg.processing.batch_size == 1000
-    assert cfg.recheck.enabled is False
+    assert not hasattr(cfg, "recheck")  # no-position rechecking was removed
     assert cfg.database_url is None
     assert cfg.redis_url == "redis://localhost:6379"
 
 
-def test_recheck_disabled_by_default_and_toggleable(tmp_path):
-    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
-    assert default_cfg.recheck.enabled is False
-
+def test_stale_recheck_section_is_ignored(tmp_path):
+    # An operator's old config.yml may still carry the section; it must not fail.
     yaml_path = write_yaml(tmp_path, "recheck:\n  enabled: true\n  batch_limit: 50\n")
-    enabled_cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
-    assert enabled_cfg.recheck.enabled is True
-    assert enabled_cfg.recheck.batch_limit == 50
-    assert enabled_cfg.recheck.interval_seconds == 3600  # untouched default
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert not hasattr(cfg, "recheck")
 
 
 def test_data_dir_defaults_under_base_dir(tmp_path):

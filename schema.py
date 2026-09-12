@@ -108,13 +108,6 @@ class ParsedKill(TypedDict):
     attackers: list[ParsedAttacker]
 
 
-class RecheckCandidate(TypedDict):
-    killmail_id: int
-    killmail_hash: str
-    killmail_time: datetime
-    last_checked: datetime
-
-
 class ProcessedDate(TypedDict):
     date: str
     total_kills: int

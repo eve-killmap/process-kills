@@ -98,6 +98,10 @@ def test_refresh_step_duration_histogram_is_labeled():
     assert _val("eve_killmap_refresh_step_duration_seconds_count", labels) == before + 1
 
 
+def test_recheck_metrics_removed():
+    assert not [name for name in dir(metrics) if name.startswith("recheck_")]
+
+
 def test_rollup_metrics():
     before = _val("eve_killmap_rollup_days_rolled_total") or 0.0
     metrics.rollup_days_rolled.inc()

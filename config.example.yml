@@ -40,16 +40,6 @@ live:
   # Delay (seconds) after a 404 (sequence not yet published) before retrying.
   retry_delay: 6.0
 
-recheck:
-  # Re-fetch no-position killmails from ESI to see if they have since gained a
-  # position. Disabled by default; no-position kills are still recorded either
-  # way. Enable only if you want the rechecking pass to run.
-  enabled: false
-  # Seconds between recheck cycles.
-  interval_seconds: 3600
-  # Maximum no-position kills examined per cycle.
-  batch_limit: 500
-
 crosscheck:
   # Hour (UTC) of the daily cross-check against zKillboard totals.
   hour: 1

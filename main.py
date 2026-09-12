@@ -12,7 +12,6 @@ from live import live_listener
 import metrics
 import stream as kill_stream
 from crosscheck import crosscheck_scheduler
-from recheck import no_position_rechecking
 from mv_refresh import fast_refresh_scheduler, slow_refresh_scheduler
 import entities
 import wars
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="EVE Killmap kill-ingestion service (live listener, "
-        "cross-checker, optional rechecking, and view refresh)."
+        "cross-checker, and view refresh)."
     )
     return parser.parse_args()
 
@@ -82,13 +81,8 @@ async def main() -> None:
         factions.faction_scheduler(esi_client, shutdown_event),
         heartbeat.heartbeat_scheduler(shutdown_event),
     ]
-    if config.recheck.enabled:
-        tasks.append(no_position_rechecking(esi_client, shutdown_event))
-
-    recheck_state = "enabled" if config.recheck.enabled else "disabled"
     logger.info(
-        f"Service started. Running live listener, cross-checker, view "
-        f"refresh (no-position rechecking {recheck_state})."
+        "Service started. Running live listener, cross-checker, and view refresh."
     )
 
     try:

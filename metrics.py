@@ -37,7 +37,7 @@ kills_processed = Counter(
     [
         "source",
         "outcome",
-    ],  # source: live|crosscheck|recheck  outcome: inserted|no_position|duplicate|skipped
+    ],  # source: live|crosscheck  outcome: inserted|no_position|duplicate|skipped
 )
 attackers_inserted = Counter(
     "eve_killmap_attackers_inserted",
@@ -141,31 +141,6 @@ crosscheck_dates_pending = Gauge(
 crosscheck_missing_kills = Counter(
     "eve_killmap_crosscheck_missing_kills",
     "Kills found missing from the DB during cross-check (and then fetched).",
-)
-
-
-# Recheck
-
-recheck_runs = Counter(
-    "eve_killmap_recheck_runs",
-    "No-position recheck cycles, by result.",
-    ["result"],  # success|failed
-)
-recheck_candidates = Gauge(
-    "eve_killmap_recheck_candidates",
-    "No-position kills examined in the last recheck cycle.",
-)
-recheck_gained_position = Counter(
-    "eve_killmap_recheck_gained_position",
-    "No-position kills that gained a position on recheck.",
-)
-recheck_still_no_position = Counter(
-    "eve_killmap_recheck_still_no_position",
-    "No-position kills still missing a position after recheck.",
-)
-recheck_last_run_timestamp = Gauge(
-    "eve_killmap_recheck_last_run_timestamp_seconds",
-    "Unix time of the last recheck cycle.",
 )
 
 
@@ -279,7 +254,7 @@ errors = Counter(
     "Unhandled errors caught in a scheduler/loop, by component.",
     [
         "component"
-    ],  # live|crosscheck|recheck|mv_refresh|rollups|leaderboards|entities|wars|factions|entity_backlog|facets|corporations|zkb
+    ],  # live|crosscheck|mv_refresh|rollups|leaderboards|entities|wars|factions|entity_backlog|facets|corporations|zkb
 )
 service_start_timestamp = Gauge(
     "eve_killmap_service_start_timestamp_seconds",

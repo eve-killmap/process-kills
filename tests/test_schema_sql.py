@@ -181,6 +181,15 @@ def test_interval_kill_mvs_removed():
         assert mv not in SCHEMA
 
 
+def test_no_position_table_carries_no_recheck_state():
+    # Kills are immutable: a no-position kill never gains one, so the recheck
+    # feature and its last_checked column/index are gone.
+    assert "CREATE TABLE IF NOT EXISTS kills_no_positions" in SCHEMA
+    assert "last_checked" not in SCHEMA
+    assert "idx_knp_last_checked" not in SCHEMA
+    assert "idx_knp_time" in SCHEMA
+
+
 def test_big_insert_only_tables_have_absolute_autovacuum_thresholds():
     # Percentage thresholds never fire on 10^8-10^9-row insert-only tables;
     # absolute ones ≈ 1-2 weeks of inserts keep stats and the visibility map fresh.

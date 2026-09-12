@@ -95,17 +95,17 @@ ALTER TABLE zkb_metadata SET (
     autovacuum_analyze_threshold          = 250000
 );
 
--- Table to store killmails without position data
+-- Killmails published without position data (NPC/structure deaths). Killmails
+-- are immutable, so these never gain a position later; the table exists so the
+-- cross-check can account for every kill zKillboard reports for a date.
 
 CREATE TABLE IF NOT EXISTS kills_no_positions (
     killmail_id BIGINT PRIMARY KEY,
     killmail_hash VARCHAR(64) NOT NULL,
-    killmail_time TIMESTAMPTZ NOT NULL,
-    last_checked TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    killmail_time TIMESTAMPTZ NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_knp_time ON kills_no_positions (killmail_time);
-CREATE INDEX IF NOT EXISTS idx_knp_last_checked ON kills_no_positions (last_checked);
 
 -- Processed data table to track the processing status of killmails by date
 

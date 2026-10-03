@@ -1,0 +1,560 @@
+from __future__ import annotations
+
+import logging
+import os
+import re
+import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any
+
+import yaml
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_CONFIG_PATH = BASE_DIR / "config.yml"
+
+VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+BEGIN_DATE = 20151103
+
+DEFAULT_PLAYER_FACTIONS = (500001, 500002, 500003, 500004, 500010, 500011)
+
+SERVICE_VERSION = "1.0.0"
+
+_DEFAULT_USER_AGENT = (
+    "eve-killmap:process-kills/1.0.0 (+https://github.com/eve-killmap/process-kills)"
+)
+
+_DEFAULT_REDIS_URL = "redis://localhost:6379"
+
+_DEFAULT_SOURCES = {
+    "r2z2_sequence_url": "https://r2z2.zkillboard.com/ephemeral/sequence.json",
+    "r2z2_ephemeral_url": "https://r2z2.zkillboard.com/ephemeral/{sequence}.json",
+    "esi_killmail_url": "https://esi.evetech.net/killmails/{killmail_id}/{killmail_hash}/",
+    "zkb_totals_url": "https://r2z2.zkillboard.com/history/totals.json",
+    "zkb_day_url": "https://r2z2.zkillboard.com/history/{date}.json",
+    "zkb_killmail_url": "https://zkillboard.com/api/killID/{killmail_id}/",
+    "esi_names_url": "https://esi.evetech.net/universe/names/",
+    "esi_corporation_url": "https://esi.evetech.net/corporations/{corporation_id}/",
+    "esi_alliance_url": "https://esi.evetech.net/alliances/{alliance_id}/",
+    "esi_factions_url": "https://esi.evetech.net/universe/factions/",
+    "esi_war_url": "https://esi.evetech.net/wars/{war_id}/",
+}
+
+
+class ConfigError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class LoggingConfig:
+    level: str
+    file: Path
+    max_bytes: int
+    backup_count: int
+
+
+@dataclass(frozen=True)
+class DatabaseConfig:
+    connect_max_retry_seconds: int
+    connect_retry_max_delay_seconds: int
+
+
+@dataclass(frozen=True)
+class SourcesConfig:
+    r2z2_sequence_url: str
+    r2z2_ephemeral_url: str
+    esi_killmail_url: str
+    zkb_totals_url: str
+    zkb_day_url: str
+    zkb_killmail_url: str
+    esi_names_url: str
+    esi_corporation_url: str
+    esi_alliance_url: str
+    esi_factions_url: str
+    esi_war_url: str
+
+
+@dataclass(frozen=True)
+class EsiConfig:
+    rate_limit: int
+    rate_limit_window: int
+
+
+@dataclass(frozen=True)
+class LiveConfig:
+    poll_delay: float
+    retry_delay: float
+
+
+@dataclass(frozen=True)
+class CrosscheckConfig:
+    hour: int
+
+
+@dataclass(frozen=True)
+class RefreshConfig:
+    slow_refresh_hour: int
+    slow_refresh_minute: int
+    mv_refresh_interval_minutes: int
+    work_mem: str
+
+
+@dataclass(frozen=True)
+class StreamingConfig:
+    stream_name: str
+    stream_max_length: int
+    discard_older_than: int
+    invalidate_channel: str
+
+
+@dataclass(frozen=True)
+class MetricsConfig:
+    enabled: bool
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
+class EntitiesConfig:
+    refresh_after_days: int
+    resolve_timeout: float
+    max_concurrency: int
+    backlog_interval: int
+
+
+@dataclass(frozen=True)
+class WarsConfig:
+    enabled: bool
+    interval: int
+    batch_size: int
+
+
+@dataclass(frozen=True)
+class CorporationsConfig:
+    enabled: bool
+    interval: int
+    batch_size: int
+    max_concurrency: int
+
+
+@dataclass(frozen=True)
+class FactionsConfig:
+    refresh_days: int
+
+
+@dataclass(frozen=True)
+class FacetsConfig:
+    enabled: bool
+
+
+@dataclass(frozen=True)
+class HeartbeatConfig:
+    interval: int
+    downtime_hour: int
+    downtime_minutes: int
+
+
+@dataclass(frozen=True)
+class LeaderboardConfig:
+    enabled: bool
+    top_n: int
+    player_factions: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class Config:
+    logging: LoggingConfig
+    database: DatabaseConfig
+    sources: SourcesConfig
+    esi: EsiConfig
+    live: LiveConfig
+    crosscheck: CrosscheckConfig
+    refresh: RefreshConfig
+    streaming: StreamingConfig
+    metrics: MetricsConfig
+    entities: EntitiesConfig
+    wars: WarsConfig
+    corporations: CorporationsConfig
+    factions: FactionsConfig
+    facets: FacetsConfig
+    heartbeat: HeartbeatConfig
+    leaderboard: LeaderboardConfig
+    user_agent: str
+    database_url: str | None
+    redis_url: str
+    uptime_kuma_push_url: str | None
+
+
+def _section(data: dict[str, Any], name: str) -> dict[str, Any]:
+    section = data.get(name) or {}
+    if not isinstance(section, dict):
+        raise ConfigError(f"Config section '{name}' must be a mapping")
+    return section
+
+
+def _as_int(
+    value: Any, label: str, *, minimum: int | None = None, maximum: int | None = None
+) -> int:
+    if isinstance(value, bool):
+        raise ConfigError(f"Config value '{label}' must be an integer, got {value!r}")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str):
+        try:
+            result = int(value.strip())
+        except ValueError:
+            raise ConfigError(
+                f"Config value '{label}' must be an integer, got {value!r}"
+            ) from None
+    else:
+        raise ConfigError(f"Config value '{label}' must be an integer, got {value!r}")
+    if minimum is not None and result < minimum:
+        raise ConfigError(f"Config value '{label}' must be >= {minimum}, got {result}")
+    if maximum is not None and result > maximum:
+        raise ConfigError(f"Config value '{label}' must be <= {maximum}, got {result}")
+    return result
+
+
+def _as_int_list(value: Any, label: str) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        raise ConfigError(
+            f"Config value '{label}' must be a list of integers, got {value!r}"
+        )
+    return tuple(
+        _as_int(item, f"{label}[{i}]", minimum=1) for i, item in enumerate(value)
+    )
+
+
+def _as_positive_float(value: Any, label: str) -> float:
+    # PyYAML parses unsigned-exponent literals as strings
+    if isinstance(value, bool):
+        raise ConfigError(f"Config value '{label}' must be a number, got {value!r}")
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        raise ConfigError(
+            f"Config value '{label}' must be a number, got {value!r}"
+        ) from None
+    if result <= 0:
+        raise ConfigError(f"Config value '{label}' must be > 0, got {result}")
+    return result
+
+
+def _load_yaml(yaml_path: Path) -> dict[str, Any]:
+    if not yaml_path.exists():
+        return {}
+    try:
+        loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Could not parse config file {yaml_path}: {exc}") from exc
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ConfigError(f"Config file {yaml_path} must contain a top-level mapping")
+    return loaded
+
+
+def load_config(
+    yaml_path: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    base_dir: Path | None = None,
+) -> Config:
+    base_dir = base_dir or BASE_DIR
+    env = os.environ if env is None else env
+    data = _load_yaml(yaml_path or DEFAULT_CONFIG_PATH)
+
+    log_cfg = _section(data, "logging")
+    db_cfg = _section(data, "database")
+    src_cfg = _section(data, "sources")
+    esi_cfg = _section(data, "esi")
+    live_cfg = _section(data, "live")
+    cross_cfg = _section(data, "crosscheck")
+    refresh_cfg = _section(data, "refresh") or _section(data, "maintenance")
+    stream_cfg = _section(data, "streaming")
+    metrics_cfg = _section(data, "metrics")
+    entities_cfg = _section(data, "entities")
+    wars_cfg = _section(data, "wars")
+    corporations_cfg = _section(data, "corporations")
+    factions_cfg = _section(data, "factions")
+    facets_cfg = _section(data, "facets")
+    heartbeat_cfg = _section(data, "heartbeat")
+    leaderboard_cfg = _section(data, "leaderboard")
+
+    level = (env.get("LOG_LEVEL") or log_cfg.get("level") or "INFO").upper()
+    if level not in VALID_LOG_LEVELS:
+        raise ConfigError(
+            f"Invalid log level {level!r}; expected one of {sorted(VALID_LOG_LEVELS)}"
+        )
+
+    log_file = Path(env.get("LOG_FILE") or log_cfg.get("file") or "process-kills.log")
+    if not log_file.is_absolute():
+        log_file = base_dir / log_file
+
+    logging_config = LoggingConfig(
+        level=level,
+        file=log_file,
+        max_bytes=_as_int(
+            log_cfg.get("max_bytes", 10 * 1024 * 1024), "logging.max_bytes", minimum=1
+        ),
+        backup_count=_as_int(
+            log_cfg.get("backup_count", 5), "logging.backup_count", minimum=0
+        ),
+    )
+
+    database_config = DatabaseConfig(
+        connect_max_retry_seconds=_as_int(
+            db_cfg.get("connect_max_retry_seconds", 60),
+            "database.connect_max_retry_seconds",
+            minimum=0,
+        ),
+        connect_retry_max_delay_seconds=_as_int(
+            db_cfg.get("connect_retry_max_delay_seconds", 10),
+            "database.connect_retry_max_delay_seconds",
+            minimum=1,
+        ),
+    )
+
+    sources_config = SourcesConfig(
+        r2z2_sequence_url=src_cfg.get("r2z2_sequence_url")
+        or _DEFAULT_SOURCES["r2z2_sequence_url"],
+        r2z2_ephemeral_url=src_cfg.get("r2z2_ephemeral_url")
+        or _DEFAULT_SOURCES["r2z2_ephemeral_url"],
+        esi_killmail_url=src_cfg.get("esi_killmail_url")
+        or _DEFAULT_SOURCES["esi_killmail_url"],
+        zkb_totals_url=src_cfg.get("zkb_totals_url")
+        or _DEFAULT_SOURCES["zkb_totals_url"],
+        zkb_day_url=src_cfg.get("zkb_day_url") or _DEFAULT_SOURCES["zkb_day_url"],
+        zkb_killmail_url=src_cfg.get("zkb_killmail_url")
+        or _DEFAULT_SOURCES["zkb_killmail_url"],
+        esi_names_url=src_cfg.get("esi_names_url") or _DEFAULT_SOURCES["esi_names_url"],
+        esi_corporation_url=src_cfg.get("esi_corporation_url")
+        or _DEFAULT_SOURCES["esi_corporation_url"],
+        esi_alliance_url=src_cfg.get("esi_alliance_url")
+        or _DEFAULT_SOURCES["esi_alliance_url"],
+        esi_factions_url=src_cfg.get("esi_factions_url")
+        or _DEFAULT_SOURCES["esi_factions_url"],
+        esi_war_url=src_cfg.get("esi_war_url") or _DEFAULT_SOURCES["esi_war_url"],
+    )
+
+    esi_config = EsiConfig(
+        rate_limit=_as_int(
+            esi_cfg.get("rate_limit", 3600), "esi.rate_limit", minimum=1
+        ),
+        rate_limit_window=_as_int(
+            esi_cfg.get("rate_limit_window", 900), "esi.rate_limit_window", minimum=1
+        ),
+    )
+
+    live_config = LiveConfig(
+        poll_delay=_as_positive_float(
+            live_cfg.get("poll_delay", 0.1), "live.poll_delay"
+        ),
+        retry_delay=_as_positive_float(
+            live_cfg.get("retry_delay", 6.0), "live.retry_delay"
+        ),
+    )
+
+    crosscheck_config = CrosscheckConfig(
+        hour=_as_int(
+            cross_cfg.get("hour", 1), "crosscheck.hour", minimum=0, maximum=23
+        ),
+    )
+
+    refresh_work_mem = str(refresh_cfg.get("work_mem", "512MB")).strip()
+    if not re.fullmatch(r"\d+\s*(kB|MB|GB|TB)?", refresh_work_mem, re.IGNORECASE):
+        raise ConfigError(
+            "Config value 'refresh.work_mem' must be a Postgres memory size like "
+            f"'512MB' or '1GB', got {refresh_work_mem!r}"
+        )
+    refresh_config = RefreshConfig(
+        slow_refresh_hour=_as_int(
+            refresh_cfg.get("slow_refresh_hour", 11),
+            "refresh.slow_refresh_hour",
+            minimum=0,
+            maximum=23,
+        ),
+        slow_refresh_minute=_as_int(
+            refresh_cfg.get("slow_refresh_minute", 0),
+            "refresh.slow_refresh_minute",
+            minimum=0,
+            maximum=59,
+        ),
+        mv_refresh_interval_minutes=_as_int(
+            refresh_cfg.get("mv_refresh_interval_minutes", 360),
+            "refresh.mv_refresh_interval_minutes",
+            minimum=1,
+        ),
+        work_mem=refresh_work_mem,
+    )
+
+    streaming_config = StreamingConfig(
+        stream_name=stream_cfg.get("stream_name", "kills:live"),
+        stream_max_length=_as_int(
+            stream_cfg.get("stream_max_length", 1000),
+            "streaming.stream_max_length",
+            maximum=5000,
+        ),
+        discard_older_than=_as_int(
+            stream_cfg.get("discard_older_than", 7200), "streaming.discard_older_than"
+        ),
+        invalidate_channel=stream_cfg.get("invalidate_channel", "cache:invalidate"),
+    )
+
+    metrics_config = MetricsConfig(
+        enabled=bool(metrics_cfg.get("enabled", False)),
+        host=env.get("METRICS_HOST") or "0.0.0.0",
+        port=_as_int(
+            env.get("METRICS_PORT") or 9108, "METRICS_PORT", minimum=1, maximum=65535
+        ),
+    )
+
+    entities_config = EntitiesConfig(
+        refresh_after_days=_as_int(
+            entities_cfg.get("refresh_after_days", 30),
+            "entities.refresh_after_days",
+            minimum=1,
+        ),
+        resolve_timeout=_as_positive_float(
+            entities_cfg.get("resolve_timeout", 10.0), "entities.resolve_timeout"
+        ),
+        max_concurrency=_as_int(
+            entities_cfg.get("max_concurrency", 10),
+            "entities.max_concurrency",
+            minimum=1,
+        ),
+        backlog_interval=_as_int(
+            entities_cfg.get("backlog_interval", 60),
+            "entities.backlog_interval",
+            minimum=1,
+        ),
+    )
+
+    wars_config = WarsConfig(
+        enabled=bool(wars_cfg.get("enabled", True)),
+        interval=_as_int(wars_cfg.get("interval", 60), "wars.interval", minimum=1),
+        batch_size=_as_int(
+            wars_cfg.get("batch_size", 100), "wars.batch_size", minimum=1
+        ),
+    )
+
+    corporations_config = CorporationsConfig(
+        enabled=bool(corporations_cfg.get("enabled", True)),
+        interval=_as_int(
+            corporations_cfg.get("interval", 60), "corporations.interval", minimum=1
+        ),
+        batch_size=_as_int(
+            corporations_cfg.get("batch_size", 250),
+            "corporations.batch_size",
+            minimum=1,
+        ),
+        max_concurrency=_as_int(
+            corporations_cfg.get("max_concurrency", 10),
+            "corporations.max_concurrency",
+            minimum=1,
+        ),
+    )
+
+    factions_config = FactionsConfig(
+        refresh_days=_as_int(
+            factions_cfg.get("refresh_days", 7), "factions.refresh_days", minimum=1
+        ),
+    )
+
+    facets_config = FacetsConfig(
+        enabled=bool(facets_cfg.get("enabled", False)),
+    )
+
+    heartbeat_config = HeartbeatConfig(
+        interval=_as_int(
+            heartbeat_cfg.get("interval", 60), "heartbeat.interval", minimum=1
+        ),
+        downtime_hour=_as_int(
+            heartbeat_cfg.get("downtime_hour", 11),
+            "heartbeat.downtime_hour",
+            minimum=0,
+            maximum=23,
+        ),
+        downtime_minutes=_as_int(
+            heartbeat_cfg.get("downtime_minutes", 20),
+            "heartbeat.downtime_minutes",
+            minimum=0,
+        ),
+    )
+
+    leaderboard_config = LeaderboardConfig(
+        enabled=bool(leaderboard_cfg.get("enabled", True)),
+        top_n=_as_int(
+            leaderboard_cfg.get("top_n", 25),
+            "leaderboard.top_n",
+            minimum=1,
+            maximum=1000,
+        ),
+        player_factions=_as_int_list(
+            leaderboard_cfg.get("player_factions", list(DEFAULT_PLAYER_FACTIONS)),
+            "leaderboard.player_factions",
+        ),
+    )
+
+    return Config(
+        logging=logging_config,
+        database=database_config,
+        sources=sources_config,
+        esi=esi_config,
+        live=live_config,
+        crosscheck=crosscheck_config,
+        refresh=refresh_config,
+        streaming=streaming_config,
+        metrics=metrics_config,
+        entities=entities_config,
+        wars=wars_config,
+        corporations=corporations_config,
+        factions=factions_config,
+        facets=facets_config,
+        heartbeat=heartbeat_config,
+        leaderboard=leaderboard_config,
+        user_agent=env.get("USER_AGENT") or _DEFAULT_USER_AGENT,
+        database_url=env.get("DATABASE_URL") or None,
+        redis_url=env.get("REDIS_URL") or _DEFAULT_REDIS_URL,
+        uptime_kuma_push_url=env.get("UPTIME_KUMA_PUSH_URL") or None,
+    )
+
+
+def require_database_url(config: Config) -> str:
+    if not config.database_url:
+        raise ConfigError("DATABASE_URL is required but not set (define it in .env)")
+    return config.database_url
+
+
+def setup_logging(config: Config) -> None:
+    root_logger = logging.getLogger()
+    root_logger.setLevel(config.logging.level)
+
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        handler.close()
+
+    formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s"
+    )
+
+    config.logging.file.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        config.logging.file,
+        maxBytes=config.logging.max_bytes,
+        backupCount=config.logging.backup_count,
+    )
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+
+load_dotenv(BASE_DIR / ".env")
+config = load_config()

@@ -1,0 +1,687 @@
+import logging
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import psycopg2
+from psycopg2.extensions import connection, cursor as Cursor
+from psycopg2.extras import execute_values
+
+from config import config, require_database_url
+from entities import EntityIds
+from schema import ProcessedDate
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def get_connection() -> Iterator[connection]:
+    conn = psycopg2.connect(require_database_url(config))
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _connect_with_retry() -> connection:
+    budget = config.database.connect_max_retry_seconds
+    max_delay = config.database.connect_retry_max_delay_seconds
+    deadline = time.monotonic() + budget
+    delay = 1.0
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return psycopg2.connect(require_database_url(config))
+        except psycopg2.OperationalError as exc:
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "Database still unreachable after ~%ds (%d attempts); "
+                    "giving up: %s",
+                    budget,
+                    attempt,
+                    exc,
+                )
+                raise
+            logger.warning(
+                "Database not ready (attempt %d), retrying in %.0fs: %s",
+                attempt,
+                delay,
+                exc,
+            )
+            time.sleep(delay)
+            delay = min(delay * 2, max_delay)
+
+
+@contextmanager
+def get_connection_with_retry() -> Iterator[connection]:
+    conn = _connect_with_retry()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_cursor(conn: connection) -> Iterator[Cursor]:
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        cursor.close()
+
+
+def init_schema(conn: connection) -> None:
+    schema_file = Path(__file__).parent / "schema.sql"
+    schema_sql = schema_file.read_text(encoding="utf-8")
+
+    with get_cursor(conn) as cursor:
+        cursor.execute(schema_sql)
+    conn.commit()
+
+
+def insert_kill(conn: connection, kill: Mapping[str, Any]) -> bool:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO kills (
+                killmail_id, killmail_hash, killmail_time, solar_system_id,
+                position_x, position_y, position_z,
+                victim_character_id, victim_corporation_id, victim_alliance_id,
+                victim_faction_id, victim_damage_taken,
+                victim_ship_type_id, war_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (killmail_id) DO NOTHING
+            RETURNING killmail_id
+            """,
+            (
+                kill["killmail_id"],
+                kill["killmail_hash"],
+                kill["killmail_time"],
+                kill["solar_system_id"],
+                round(kill["position_x"]),
+                round(kill["position_y"]),
+                round(kill["position_z"]),
+                kill.get("victim_character_id"),
+                kill.get("victim_corporation_id"),
+                kill.get("victim_alliance_id"),
+                kill.get("victim_faction_id"),
+                kill["victim_damage_taken"],
+                kill["victim_ship_type_id"],
+                kill.get("war_id"),
+            ),
+        )
+        inserted = cursor.fetchone() is not None
+
+        if inserted:
+            attackers = kill.get("attackers", [])
+            for idx, attacker in enumerate(attackers):
+                cursor.execute(
+                    """
+                    INSERT INTO kill_attackers (
+                        killmail_id, attacker_index, character_id, corporation_id,
+                        alliance_id, faction_id, ship_type_id, weapon_type_id,
+                        damage_done, final_blow, security_status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (killmail_id, attacker_index) DO NOTHING
+                    """,
+                    (
+                        kill["killmail_id"],
+                        idx,
+                        attacker.get("character_id"),
+                        attacker.get("corporation_id"),
+                        attacker.get("alliance_id"),
+                        attacker.get("faction_id"),
+                        attacker.get("ship_type_id"),
+                        attacker.get("weapon_type_id"),
+                        attacker["damage_done"],
+                        attacker["final_blow"],
+                        attacker["security_status"],
+                    ),
+                )
+
+    conn.commit()
+    return inserted
+
+
+def insert_no_position_kill(
+    conn: connection, killmail_id: int, killmail_hash: str, killmail_time: str
+) -> bool:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO kills_no_positions (killmail_id, killmail_hash, killmail_time)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (killmail_id) DO NOTHING
+            RETURNING killmail_id
+            """,
+            (killmail_id, killmail_hash, killmail_time),
+        )
+        inserted = cursor.fetchone() is not None
+    conn.commit()
+    return inserted
+
+
+def get_existing_killmail_ids(conn: connection, killmail_ids: list[int]) -> set[int]:
+    if not killmail_ids:
+        return set()
+    found: set[int] = set()
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT killmail_id FROM kills WHERE killmail_id = ANY(%s)", (killmail_ids,)
+        )
+        found.update(row[0] for row in cursor.fetchall())
+        cursor.execute(
+            "SELECT killmail_id FROM kills_no_positions WHERE killmail_id = ANY(%s)",
+            (killmail_ids,),
+        )
+        found.update(row[0] for row in cursor.fetchall())
+    return found
+
+
+def get_processed_date(conn: connection, date: str) -> ProcessedDate | None:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            SELECT date, total_kills, processed_kills, no_position_kills,
+                   last_updated, error_message
+            FROM processed_data
+            WHERE date = %s
+            """,
+            (date,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "date": row[0],
+                "total_kills": row[1],
+                "processed_kills": row[2],
+                "no_position_kills": row[3],
+                "last_updated": row[4],
+                "error_message": row[5],
+            }
+    return None
+
+
+def update_processed_date(
+    conn: connection,
+    date: str,
+    total_kills: int,
+    processed_kills: int = 0,
+    no_position_kills: int = 0,
+    error_message: str | None = None,
+) -> None:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO processed_data (
+                date, total_kills, processed_kills, no_position_kills,
+                last_updated, error_message
+            ) VALUES (%s, %s, %s, %s, NOW(), %s)
+            ON CONFLICT (date) DO UPDATE SET
+                total_kills = EXCLUDED.total_kills,
+                processed_kills = EXCLUDED.processed_kills,
+                no_position_kills = EXCLUDED.no_position_kills,
+                last_updated = NOW(),
+                error_message = EXCLUDED.error_message
+            """,
+            (date, total_kills, processed_kills, no_position_kills, error_message),
+        )
+    conn.commit()
+
+
+def increment_processed_kills(conn: connection, date: str) -> None:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO processed_data (date, total_kills, processed_kills, no_position_kills, last_updated)
+            VALUES (%s, 1, 1, 0, NOW())
+            ON CONFLICT (date) DO UPDATE SET
+                processed_kills = processed_data.processed_kills + 1,
+                total_kills = GREATEST(
+                    processed_data.total_kills,
+                    processed_data.processed_kills + 1 + processed_data.no_position_kills
+                ),
+                last_updated = NOW()
+            """,
+            (date,),
+        )
+    conn.commit()
+
+
+def increment_no_position_kills(conn: connection, date: str) -> None:
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO processed_data (date, total_kills, processed_kills, no_position_kills, last_updated)
+            VALUES (%s, 1, 0, 1, NOW())
+            ON CONFLICT (date) DO UPDATE SET
+                no_position_kills = processed_data.no_position_kills + 1,
+                total_kills = GREATEST(
+                    processed_data.total_kills,
+                    processed_data.processed_kills + processed_data.no_position_kills + 1
+                ),
+                last_updated = NOW()
+            """,
+            (date,),
+        )
+    conn.commit()
+
+
+def get_live_sequence(conn: connection) -> int | None:
+    with get_cursor(conn) as cursor:
+        cursor.execute("SELECT sequence FROM live_state LIMIT 1")
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+
+def set_live_sequence(conn: connection, sequence: int) -> None:
+    with get_cursor(conn) as cursor:
+        cursor.execute("DELETE FROM live_state")
+        cursor.execute("INSERT INTO live_state (sequence) VALUES (%s)", (sequence,))
+    conn.commit()
+
+
+def _fresh_ids(
+    conn: connection, table: str, id_col: str, ids: list[int], cutoff: Any
+) -> set[int]:
+    if not ids:
+        return set()
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            f"SELECT {id_col} FROM {table} "
+            f"WHERE {id_col} = ANY(%s) AND resolved_at > %s",
+            (ids, cutoff),
+        )
+        return {row[0] for row in cursor.fetchall()}
+
+
+def get_fresh_character_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "characters", "character_id", ids, cutoff)
+
+
+def get_fresh_corporation_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "corporations", "corporation_id", ids, cutoff)
+
+
+def get_fresh_alliance_ids(conn, ids, cutoff):
+    return _fresh_ids(conn, "alliances", "alliance_id", ids, cutoff)
+
+
+def upsert_characters(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO characters (character_id, name) VALUES %s
+            ON CONFLICT (character_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, characters.name),
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def upsert_corporations(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO corporations (
+                corporation_id, name, ticker, alliance_id,
+                date_founded, member_count, refresh_after
+            ) VALUES %s
+            ON CONFLICT (corporation_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, corporations.name),
+                ticker = COALESCE(EXCLUDED.ticker, corporations.ticker),
+                alliance_id = EXCLUDED.alliance_id,
+                date_founded = COALESCE(EXCLUDED.date_founded, corporations.date_founded),
+                member_count = EXCLUDED.member_count,
+                refresh_after = EXCLUDED.refresh_after,
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def mark_corporation_closed(conn, corporation_id):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE corporations SET refresh_after = NULL, resolved_at = NOW() "
+            "WHERE corporation_id = %s",
+            (corporation_id,),
+        )
+    conn.commit()
+
+
+def set_corporation_refresh_after(conn, corporation_id, refresh_after):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE corporations SET refresh_after = %s WHERE corporation_id = %s",
+            (refresh_after, corporation_id),
+        )
+    conn.commit()
+
+
+def upsert_alliances(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO alliances (alliance_id, name, ticker, date_founded) VALUES %s
+            ON CONFLICT (alliance_id) DO UPDATE SET
+                name = COALESCE(EXCLUDED.name, alliances.name),
+                ticker = COALESCE(EXCLUDED.ticker, alliances.ticker),
+                date_founded = COALESCE(EXCLUDED.date_founded, alliances.date_founded),
+                resolved_at = NOW()
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def enqueue_entity_backlog(conn, killmail_id):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "INSERT INTO entity_resolve_backlog (killmail_id) VALUES (%s) "
+            "ON CONFLICT (killmail_id) DO NOTHING",
+            (killmail_id,),
+        )
+    conn.commit()
+
+
+def get_entity_backlog(conn, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT killmail_id, attempts FROM entity_resolve_backlog "
+            "ORDER BY queued_at LIMIT %s",
+            (limit,),
+        )
+        return [(row[0], row[1]) for row in cursor.fetchall()]
+
+
+def increment_entity_backlog_attempts(conn, killmail_id):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE entity_resolve_backlog SET attempts = attempts + 1 "
+            "WHERE killmail_id = %s",
+            (killmail_id,),
+        )
+    conn.commit()
+
+
+def delete_entity_backlog(conn, killmail_id):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "DELETE FROM entity_resolve_backlog WHERE killmail_id = %s", (killmail_id,)
+        )
+    conn.commit()
+
+
+def count_entity_backlog(conn):
+    with get_cursor(conn) as cursor:
+        cursor.execute("SELECT COUNT(*) FROM entity_resolve_backlog")
+        return cursor.fetchone()[0]
+
+
+def get_kill_entity_ids(conn, killmail_id):
+    characters: set[int] = set()
+    corporations: set[int] = set()
+    alliances: set[int] = set()
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT victim_character_id, victim_corporation_id, victim_alliance_id "
+            "FROM kills WHERE killmail_id = %s",
+            (killmail_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            if row[0] is not None:
+                characters.add(row[0])
+            if row[1] is not None:
+                corporations.add(row[1])
+            if row[2] is not None:
+                alliances.add(row[2])
+        cursor.execute(
+            "SELECT character_id, corporation_id, alliance_id "
+            "FROM kill_attackers WHERE killmail_id = %s",
+            (killmail_id,),
+        )
+        for c, corp, alli in cursor.fetchall():
+            if c is not None:
+                characters.add(c)
+            if corp is not None:
+                corporations.add(corp)
+            if alli is not None:
+                alliances.add(alli)
+    return EntityIds(
+        frozenset(characters), frozenset(corporations), frozenset(alliances)
+    )
+
+
+def insert_war_stub(conn, war_id):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "INSERT INTO wars (war_id) VALUES (%s) ON CONFLICT (war_id) DO NOTHING",
+            (war_id,),
+        )
+    conn.commit()
+
+
+def get_due_wars(conn, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT war_id FROM wars "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW() "
+            "ORDER BY refresh_after LIMIT %s",
+            (limit,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def count_due_wars(conn):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) FROM wars "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW()"
+        )
+        return cursor.fetchone()[0]
+
+
+def get_due_corporations(conn, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT corporation_id FROM corporations "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW() "
+            "ORDER BY refresh_after LIMIT %s",
+            (limit,),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def count_due_corporations(conn):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) FROM corporations "
+            "WHERE refresh_after IS NOT NULL AND refresh_after <= NOW()"
+        )
+        return cursor.fetchone()[0]
+
+
+def upsert_war(conn, row, resolved_at, refresh_after):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO wars (
+                war_id, declared, started, finished, retracted, mutual,
+                open_for_allies, aggressor_corporation_id, aggressor_alliance_id,
+                aggressor_ships_killed, aggressor_isk_destroyed,
+                defender_corporation_id, defender_alliance_id,
+                defender_ships_killed, defender_isk_destroyed,
+                ally_corporation_ids, ally_alliance_ids, resolved_at, refresh_after
+            ) VALUES (
+                %(war_id)s, %(declared)s, %(started)s, %(finished)s, %(retracted)s,
+                %(mutual)s, %(open_for_allies)s, %(aggressor_corporation_id)s,
+                %(aggressor_alliance_id)s, %(aggressor_ships_killed)s,
+                %(aggressor_isk_destroyed)s, %(defender_corporation_id)s,
+                %(defender_alliance_id)s, %(defender_ships_killed)s,
+                %(defender_isk_destroyed)s, %(ally_corporation_ids)s,
+                %(ally_alliance_ids)s, %(resolved_at)s, %(refresh_after)s
+            )
+            ON CONFLICT (war_id) DO UPDATE SET
+                declared = EXCLUDED.declared, started = EXCLUDED.started,
+                finished = EXCLUDED.finished, retracted = EXCLUDED.retracted,
+                mutual = EXCLUDED.mutual, open_for_allies = EXCLUDED.open_for_allies,
+                aggressor_corporation_id = EXCLUDED.aggressor_corporation_id,
+                aggressor_alliance_id = EXCLUDED.aggressor_alliance_id,
+                aggressor_ships_killed = EXCLUDED.aggressor_ships_killed,
+                aggressor_isk_destroyed = EXCLUDED.aggressor_isk_destroyed,
+                defender_corporation_id = EXCLUDED.defender_corporation_id,
+                defender_alliance_id = EXCLUDED.defender_alliance_id,
+                defender_ships_killed = EXCLUDED.defender_ships_killed,
+                defender_isk_destroyed = EXCLUDED.defender_isk_destroyed,
+                ally_corporation_ids = EXCLUDED.ally_corporation_ids,
+                ally_alliance_ids = EXCLUDED.ally_alliance_ids,
+                resolved_at = EXCLUDED.resolved_at,
+                refresh_after = EXCLUDED.refresh_after
+            """,
+            {**row, "resolved_at": resolved_at, "refresh_after": refresh_after},
+        )
+    conn.commit()
+
+
+def set_war_refresh_after(conn, war_id, refresh_after):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "UPDATE wars SET refresh_after = %s WHERE war_id = %s",
+            (refresh_after, war_id),
+        )
+    conn.commit()
+
+
+def seed_war_stubs(conn):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "INSERT INTO wars (war_id) "
+            "SELECT DISTINCT war_id FROM kills WHERE war_id IS NOT NULL "
+            "ON CONFLICT (war_id) DO NOTHING"
+        )
+        added = cursor.rowcount
+    conn.commit()
+    return added
+
+
+def get_distinct_character_ids_after(conn, after, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT id FROM ("
+            "  SELECT DISTINCT character_id AS id FROM kill_attackers "
+            "    WHERE character_id > %s AND character_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_character_id AS id FROM kills "
+            "    WHERE victim_character_id > %s AND victim_character_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def get_distinct_corporation_ids_after(conn, after, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT id FROM ("
+            "  SELECT DISTINCT corporation_id AS id FROM kill_attackers "
+            "    WHERE corporation_id > %s AND corporation_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_corporation_id AS id FROM kills "
+            "    WHERE victim_corporation_id > %s AND victim_corporation_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def get_distinct_alliance_ids_after(conn, after, limit):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            "SELECT id FROM ("
+            "  SELECT DISTINCT alliance_id AS id FROM kill_attackers "
+            "    WHERE alliance_id > %s AND alliance_id IS NOT NULL "
+            "  UNION "
+            "  SELECT DISTINCT victim_alliance_id AS id FROM kills "
+            "    WHERE victim_alliance_id > %s AND victim_alliance_id IS NOT NULL"
+            ") u ORDER BY id LIMIT %s",
+            (after, after, limit),
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def upsert_factions(conn, rows):
+    if not rows:
+        return
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO factions (faction_id, name) VALUES %s
+            ON CONFLICT (faction_id) DO UPDATE SET name = EXCLUDED.name
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def insert_facets(conn, killmail_id, solar_system_id, killmail_time, facets):
+    if not facets:
+        return
+    rows = [
+        (kind, value, role, solar_system_id, killmail_time, killmail_id)
+        for kind, value, role in facets
+    ]
+    with get_cursor(conn) as cursor:
+        execute_values(
+            cursor,
+            """
+            INSERT INTO kill_facets
+                (facet_kind, facet_value, role, solar_system_id, killmail_time, killmail_id)
+            VALUES %s
+            ON CONFLICT DO NOTHING
+            """,
+            rows,
+        )
+    conn.commit()
+
+
+def insert_zkb_metadata(conn, killmail_id, solar_system_id, killmail_time, zkb):
+    with get_cursor(conn) as cursor:
+        cursor.execute(
+            """
+            INSERT INTO zkb_metadata (
+                killmail_id, solar_system_id, killmail_time,
+                fitted_value, dropped_value, destroyed_value, total_value,
+                total_droppable_value, npc, solo, awox, labels
+            ) VALUES (
+                %(killmail_id)s, %(solar_system_id)s, %(killmail_time)s,
+                %(fitted_value)s, %(dropped_value)s, %(destroyed_value)s, %(total_value)s,
+                %(total_droppable_value)s, %(npc)s, %(solo)s, %(awox)s, %(labels)s
+            )
+            ON CONFLICT (killmail_id) DO NOTHING
+            """,
+            {
+                "killmail_id": killmail_id,
+                "solar_system_id": solar_system_id,
+                "killmail_time": killmail_time,
+                **zkb,
+            },
+        )
+    conn.commit()

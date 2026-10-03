@@ -1,0 +1,94 @@
+import asyncio
+
+from esi import ESIClient
+
+
+class _FakeResp:
+    def __init__(self, status, payload):
+        self.status = status
+        self._payload = payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self):
+        return self._payload
+
+
+class _FakeSession:
+
+    def __init__(self):
+        self.batches = []
+
+    def post(self, url, json):
+        self.batches.append(list(json))
+        return _FakeResp(200, [{"id": i, "name": f"name-{i}"} for i in json])
+
+
+class _FakeGetSession:
+
+    def __init__(self, resp):
+        self._resp = resp
+        self.urls = []
+
+    def get(self, url):
+        self.urls.append(url)
+        return self._resp
+
+
+def _client_with_session(session):
+    client = ESIClient(asyncio.Event())
+    client._session = session
+    return client
+
+
+def test_resolve_names_empty_is_noop():
+    client = _client_with_session(_FakeSession())
+    assert asyncio.run(client.resolve_names(set())) == ({}, set())
+
+
+def test_resolve_names_batches_by_1000():
+    session = _FakeSession()
+    client = _client_with_session(session)
+    ids = set(range(1, 2501))
+    resolved, failed = asyncio.run(client.resolve_names(ids))
+    assert len(resolved) == 2500
+    assert failed == set()
+    assert resolved[1] == "name-1"
+    assert sorted(len(b) for b in session.batches) == [500, 1000, 1000]
+
+
+def test_resolve_names_absent_id_from_200_is_not_failed():
+    class _PartialSession:
+        def post(self, url, json):
+            return _FakeResp(200, [{"id": i, "name": f"name-{i}"} for i in json[:-1]])
+
+    client = _client_with_session(_PartialSession())
+    resolved, failed = asyncio.run(client.resolve_names({1, 2, 3}))
+    assert len(resolved) == 2
+    assert failed == set()
+
+
+def test_get_corporation_success_returns_full_record():
+    payload = {
+        "name": "Test Corp",
+        "ticker": "TEST",
+        "member_count": 5,
+        "state": "active",
+    }
+    resp = _FakeResp(200, payload)
+    client = _client_with_session(_FakeGetSession(resp))
+    assert asyncio.run(client.get_corporation(98000001)) == payload
+
+
+def test_get_corporation_404_returns_none():
+    client = _client_with_session(_FakeGetSession(_FakeResp(404, {})))
+    assert asyncio.run(client.get_corporation(98000001)) is None
+
+
+def test_get_factions_non_200_returns_empty_list():
+    client = _client_with_session(_FakeGetSession(_FakeResp(500, {})))
+    assert asyncio.run(client.get_factions()) == []

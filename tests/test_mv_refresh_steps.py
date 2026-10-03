@@ -1,0 +1,386 @@
+import asyncio
+from dataclasses import replace
+
+from prometheus_client import REGISTRY
+
+import mv_refresh
+from mv_refresh import RefreshStep
+
+
+def _val(name, labels=None):
+    return REGISTRY.get_sample_value(name, labels or {}) or 0.0
+
+
+def _pin_leaderboard(monkeypatch, enabled):
+    pinned = replace(
+        mv_refresh.config,
+        leaderboard=replace(mv_refresh.config.leaderboard, enabled=enabled),
+    )
+    monkeypatch.setattr(mv_refresh, "config", pinned)
+
+
+def _boom():
+    raise RuntimeError("step exploded")
+
+
+def test_run_step_success_records_metrics():
+    labels = {"cadence": "fast", "step": "t_ok", "result": "success"}
+    before = _val("eve_killmap_refresh_step_runs_total", labels)
+    assert (
+        mv_refresh._run_step(RefreshStep("t_ok", lambda: True, ["x"]), "fast")
+        == "success"
+    )
+    assert _val("eve_killmap_refresh_step_runs_total", labels) == before + 1
+    assert (
+        _val(
+            "eve_killmap_refresh_step_duration_seconds_count",
+            {"cadence": "fast", "step": "t_ok"},
+        )
+        >= 1
+    )
+
+
+def test_run_step_skipped_when_step_did_no_work():
+    labels = {"cadence": "fast", "step": "t_skip", "result": "skipped"}
+    before = _val("eve_killmap_refresh_step_runs_total", labels)
+    assert (
+        mv_refresh._run_step(RefreshStep("t_skip", lambda: False, ["x"]), "fast")
+        == "skipped"
+    )
+    assert _val("eve_killmap_refresh_step_runs_total", labels) == before + 1
+
+
+def test_run_step_failure_is_contained_and_counted():
+    labels = {"cadence": "slow", "step": "t_bad", "result": "failed"}
+    before = _val("eve_killmap_refresh_step_runs_total", labels)
+    errors_before = _val("eve_killmap_errors_total", {"component": "t_bad"})
+    assert mv_refresh._run_step(RefreshStep("t_bad", _boom, ["x"]), "slow") == "failed"
+    assert _val("eve_killmap_refresh_step_runs_total", labels) == before + 1
+    assert _val("eve_killmap_errors_total", {"component": "t_bad"}) == errors_before + 1
+
+
+def test_run_cycle_publishes_only_for_successful_steps(monkeypatch):
+    published = []
+
+    async def fake_publish(client, targets):
+        published.append(targets)
+
+    monkeypatch.setattr(mv_refresh, "publish_invalidation", fake_publish)
+    steps = [
+        RefreshStep("a", lambda: True, ["t_a"]),
+        RefreshStep("b", lambda: False, ["t_b"]),
+        RefreshStep("c", _boom, ["t_c"]),
+        RefreshStep("d", lambda: True, []),
+        RefreshStep("e", lambda: True, ["t_e"]),
+    ]
+    failed = asyncio.run(mv_refresh._run_cycle(steps, "fast", redis=object()))
+    assert failed is True
+    assert published == [["t_a"], ["t_e"]]
+
+
+def test_run_cycle_without_redis_publishes_nothing(monkeypatch):
+    async def fail_publish(client, targets):
+        raise AssertionError("must not publish without redis")
+
+    monkeypatch.setattr(mv_refresh, "publish_invalidation", fail_publish)
+    failed = asyncio.run(
+        mv_refresh._run_cycle(
+            [RefreshStep("a", lambda: True, ["t"])], "fast", redis=None
+        )
+    )
+    assert failed is False
+
+
+def test_run_cycle_stops_between_steps_when_shutdown_requested(monkeypatch):
+    ran = []
+    calls = {"n": 0}
+
+    def stop():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    steps = [
+        RefreshStep("a", lambda: ran.append("a") or True, []),
+        RefreshStep("b", lambda: ran.append("b") or True, []),
+    ]
+    failed = asyncio.run(mv_refresh._run_cycle(steps, "fast", redis=None, stop=stop))
+    assert ran == ["a"]
+    assert failed is False
+
+
+def test_run_cycle_records_nothing_when_shutdown_precedes_the_first_step():
+    ok = {"cadence": "slow", "result": "success"}
+    before = _val("eve_killmap_mv_refresh_runs_total", ok)
+    ts_before = _val(
+        "eve_killmap_mv_refresh_last_success_timestamp_seconds", {"cadence": "slow"}
+    )
+    steps = [RefreshStep("a", lambda: True, [])]
+    failed = asyncio.run(
+        mv_refresh._run_cycle(steps, "slow", redis=None, stop=lambda: True)
+    )
+    assert failed is False
+    assert _val("eve_killmap_mv_refresh_runs_total", ok) == before
+    assert (
+        _val(
+            "eve_killmap_mv_refresh_last_success_timestamp_seconds", {"cadence": "slow"}
+        )
+        == ts_before
+    )
+
+
+def test_slow_steps_thread_the_stop_check_into_both_steps(monkeypatch):
+    import contextlib
+
+    class _Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append(sql)
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __init__(self):
+            self.cur = _Cur()
+            self.autocommit = False
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            pass
+
+    conns = []
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        c = _Conn()
+        conns.append(c)
+        yield c
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+    seen = {}
+    monkeypatch.setattr(
+        mv_refresh.leaderboard,
+        "compute_boards",
+        lambda conn, w, should_stop=None: (
+            seen.setdefault("boards_stop", should_stop),
+            True,
+        )[1],
+    )
+    _pin_leaderboard(monkeypatch, True)
+    marker = lambda: False  # noqa: E731
+
+    leaderboards, mv = mv_refresh._slow_steps(marker)
+    assert leaderboards.run() is True
+    assert seen["boards_stop"] is marker
+    assert mv_refresh._refresh_views(["mv_a", "mv_b"], stop=lambda: True) is False
+    assert not any("REFRESH" in s for s in conns[-1].cur.sql)
+
+
+def test_fast_steps_pass_the_stop_check_into_the_rollups_step(monkeypatch):
+    import contextlib
+
+    class _Conn:
+        def cursor(self):
+            return contextlib.nullcontext(
+                type("C", (), {"execute": lambda *a, **k: None})()
+            )
+
+        def commit(self):
+            pass
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        yield _Conn()
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+    seen = {}
+    monkeypatch.setattr(
+        mv_refresh.rollups,
+        "roll_dirty_days",
+        lambda conn, should_stop=None: seen.setdefault("stop", should_stop) or True,
+    )
+    _pin_leaderboard(monkeypatch, True)
+    marker = lambda: False  # noqa: E731
+
+    mv_refresh._fast_steps(marker)[0].run()
+
+    assert seen["stop"] is marker
+
+
+def test_run_cycle_records_cycle_level_metrics(monkeypatch):
+    ok = {"cadence": "fast", "result": "success"}
+    bad = {"cadence": "fast", "result": "failed"}
+    ok_before, bad_before = _val("eve_killmap_mv_refresh_runs_total", ok), _val(
+        "eve_killmap_mv_refresh_runs_total", bad
+    )
+
+    asyncio.run(
+        mv_refresh._run_cycle([RefreshStep("a", lambda: True, [])], "fast", redis=None)
+    )
+    assert _val("eve_killmap_mv_refresh_runs_total", ok) == ok_before + 1
+    assert (
+        _val(
+            "eve_killmap_mv_refresh_last_success_timestamp_seconds", {"cadence": "fast"}
+        )
+        > 0
+    )
+
+    asyncio.run(
+        mv_refresh._run_cycle([RefreshStep("a", _boom, [])], "fast", redis=None)
+    )
+    assert _val("eve_killmap_mv_refresh_runs_total", bad) == bad_before + 1
+
+
+def test_fast_steps_order_and_targets(monkeypatch):
+    _pin_leaderboard(monkeypatch, True)
+    steps = mv_refresh._fast_steps()
+    assert [s.name for s in steps] == ["rollups", "leaderboards", "mv_refresh"]
+    assert steps[0].invalidation == mv_refresh._FAST_INVALIDATION
+    assert steps[1].invalidation == ["leaderboards"]
+    assert steps[2].invalidation == mv_refresh._FAST_INVALIDATION
+
+
+def test_slow_steps_order_and_targets(monkeypatch):
+    _pin_leaderboard(monkeypatch, True)
+    steps = mv_refresh._slow_steps()
+    assert [s.name for s in steps] == ["leaderboards", "mv_refresh"]
+    assert steps[0].invalidation == ["leaderboards"]
+    assert steps[1].invalidation == mv_refresh._SLOW_INVALIDATION == ["farthest_kill"]
+
+
+def test_leaderboard_steps_absent_when_disabled(monkeypatch):
+    _pin_leaderboard(monkeypatch, False)
+    assert [s.name for s in mv_refresh._fast_steps()] == ["rollups", "mv_refresh"]
+    assert [s.name for s in mv_refresh._slow_steps()] == ["mv_refresh"]
+
+
+def test_step_bodies_use_their_own_configured_connection(monkeypatch):
+    import contextlib
+
+    class _Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append((sql, params))
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __init__(self):
+            self.cur = _Cur()
+            self.commits = 0
+            self.autocommit = False
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            self.commits += 1
+
+    conns = []
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        c = _Conn()
+        conns.append(c)
+        yield c
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+    seen = {}
+    monkeypatch.setattr(
+        mv_refresh.rollups,
+        "roll_dirty_days",
+        lambda conn, should_stop=None: seen.setdefault("roll", conn) and True,
+    )
+    monkeypatch.setattr(
+        mv_refresh.leaderboard,
+        "compute_boards",
+        lambda conn, w, should_stop=None: seen.setdefault("boards", (conn, w)) and True,
+    )
+    _pin_leaderboard(monkeypatch, True)
+
+    fast = mv_refresh._fast_steps()
+    assert fast[0].run() is True and fast[1].run() is True
+
+    assert seen["roll"] is conns[0] and seen["boards"][0] is conns[1]
+    assert seen["boards"][1] == mv_refresh.leaderboard.FAST_WINDOWS
+    for c in conns:
+        sqls = [s for s, _ in c.cur.sql]
+        assert any("set_config('work_mem'" in s for s in sqls)
+        assert any("set_config('TimeZone', 'UTC', false)" in s for s in sqls)
+        assert c.commits >= 1
+
+
+def test_refresh_views_runs_concurrent_refreshes_in_order(monkeypatch):
+    import contextlib
+
+    class _Cur:
+        def __init__(self):
+            self.sql = []
+
+        def execute(self, sql, params=None):
+            self.sql.append((sql, params))
+
+        def close(self):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __init__(self):
+            self.cur = _Cur()
+            self.commits = 0
+            self.autocommit = False
+
+        def cursor(self):
+            return self.cur
+
+        def commit(self):
+            self.commits += 1
+
+    conns = []
+
+    @contextlib.contextmanager
+    def fake_get_connection():
+        c = _Conn()
+        conns.append(c)
+        yield c
+
+    monkeypatch.setattr(mv_refresh, "get_connection", fake_get_connection)
+
+    assert mv_refresh._refresh_views(["mv_a", "mv_b"]) is True
+
+    conn = conns[0]
+    assert conn.autocommit is True
+    sqls = [s for s, _ in conn.cur.sql]
+    assert sqls.count("SELECT set_config('work_mem', %s, false)") == 1
+    assert sqls.count("SELECT set_config('TimeZone', 'UTC', false)") == 1
+    refresh_sqls = [
+        s for s in sqls if s.startswith("REFRESH MATERIALIZED VIEW CONCURRENTLY")
+    ]
+    assert refresh_sqls == [
+        "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_a",
+        "REFRESH MATERIALIZED VIEW CONCURRENTLY mv_b",
+    ]

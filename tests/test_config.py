@@ -1,0 +1,468 @@
+import logging
+from pathlib import Path
+
+import pytest
+
+from config import (
+    ConfigError,
+    load_config,
+    require_database_url,
+    setup_logging,
+)
+
+
+def write_yaml(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "config.yml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_defaults_used_when_no_yaml_and_empty_env(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+
+    assert cfg.logging.level == "INFO"
+    assert cfg.logging.backup_count == 5
+    assert cfg.esi.rate_limit == 3600
+    assert cfg.esi.rate_limit_window == 900
+    assert cfg.live.poll_delay == pytest.approx(0.1)
+    assert cfg.live.retry_delay == pytest.approx(6.0)
+    assert cfg.crosscheck.hour == 1
+    assert cfg.refresh.slow_refresh_hour == 11
+    assert cfg.refresh.slow_refresh_minute == 0
+    assert cfg.refresh.mv_refresh_interval_minutes == 360
+    assert cfg.streaming.stream_name == "kills:live"
+    assert cfg.streaming.stream_max_length == 1000
+    assert cfg.streaming.discard_older_than == 7200
+    assert cfg.streaming.invalidate_channel == "cache:invalidate"
+    assert not hasattr(cfg, "recheck")
+    assert cfg.database_url is None
+    assert cfg.redis_url == "redis://localhost:6379"
+
+
+def test_slow_refresh_time_override_and_validation(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path, "refresh:\n  slow_refresh_hour: 11\n  slow_refresh_minute: 20\n"
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert (cfg.refresh.slow_refresh_hour, cfg.refresh.slow_refresh_minute) == (11, 20)
+
+    with pytest.raises(ConfigError, match="refresh.slow_refresh_hour"):
+        load_config(
+            yaml_path=write_yaml(tmp_path, "refresh:\n  slow_refresh_hour: 24\n"),
+            env={},
+            base_dir=tmp_path,
+        )
+    with pytest.raises(ConfigError, match="refresh.slow_refresh_minute"):
+        load_config(
+            yaml_path=write_yaml(tmp_path, "refresh:\n  slow_refresh_minute: 60\n"),
+            env={},
+            base_dir=tmp_path,
+        )
+
+    cfg = load_config(
+        yaml_path=write_yaml(tmp_path, "refresh:\n  day: 6\n  hour: 4\n"),
+        env={},
+        base_dir=tmp_path,
+    )
+    assert not hasattr(cfg.refresh, "day")
+
+
+def test_stale_recheck_section_is_ignored(tmp_path):
+    yaml_path = write_yaml(tmp_path, "recheck:\n  enabled: true\n  batch_limit: 50\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert not hasattr(cfg, "recheck")
+
+
+def test_yaml_overrides_defaults(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path,
+        """
+        logging:
+          level: WARNING
+          backup_count: 9
+        esi:
+          rate_limit: 1200
+        crosscheck:
+          hour: 5
+        """,
+    )
+
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+    assert cfg.logging.level == "WARNING"
+    assert cfg.logging.backup_count == 9
+    assert cfg.esi.rate_limit == 1200
+    assert cfg.crosscheck.hour == 5
+    assert cfg.esi.rate_limit_window == 900
+
+
+def test_env_overrides_yaml_and_defaults(tmp_path):
+    yaml_path = write_yaml(tmp_path, "logging:\n  level: WARNING\n")
+    env = {
+        "LOG_LEVEL": "DEBUG",
+        "DATABASE_URL": "postgresql://u:p@host/db",
+        "REDIS_URL": "redis://example:6380",
+        "USER_AGENT": "test-agent/1.0",
+        "LOG_FILE": "custom.log",
+    }
+
+    cfg = load_config(yaml_path=yaml_path, env=env, base_dir=tmp_path)
+
+    assert cfg.logging.level == "DEBUG"
+    assert cfg.database_url == "postgresql://u:p@host/db"
+    assert cfg.redis_url == "redis://example:6380"
+    assert cfg.user_agent == "test-agent/1.0"
+    assert cfg.logging.file == tmp_path / "custom.log"
+
+
+def test_env_defaults_to_os_environ_when_not_passed(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://from/environ")
+    cfg = load_config(yaml_path=tmp_path / "x.yml", base_dir=tmp_path)
+    assert cfg.database_url == "postgresql://from/environ"
+
+
+def test_default_user_agent_is_pii_free(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert "@" not in cfg.user_agent
+    assert "process-kills" in cfg.user_agent
+
+
+def test_log_level_is_case_insensitive(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml", env={"LOG_LEVEL": "debug"}, base_dir=tmp_path
+    )
+    assert cfg.logging.level == "DEBUG"
+
+
+def test_invalid_log_level_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "logging:\n  level: CHATTY\n")
+    with pytest.raises(ConfigError, match="log level"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_malformed_yaml_raises_config_error(tmp_path):
+    yaml_path = write_yaml(tmp_path, "logging: : :\n  - broken\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_yaml_top_level_must_be_mapping(tmp_path):
+    yaml_path = write_yaml(tmp_path, "- just\n- a\n- list\n")
+    with pytest.raises(ConfigError, match="mapping"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_poll_delay_accepts_unsigned_exponent_strings(tmp_path):
+    yaml_path = write_yaml(tmp_path, "live:\n  poll_delay: 1e-1\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.live.poll_delay == pytest.approx(0.1)
+
+
+def test_non_numeric_poll_delay_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "live:\n  poll_delay: not-a-number\n")
+    with pytest.raises(ConfigError, match="number"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_crosscheck_hour_out_of_range_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "crosscheck:\n  hour: 24\n")
+    with pytest.raises(ConfigError, match="crosscheck.hour"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_mv_refresh_interval_minutes_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "refresh:\n  mv_refresh_interval_minutes: 0\n")
+    with pytest.raises(ConfigError, match="mv_refresh_interval_minutes"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_heartbeat_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "missing.yml", env={}, base_dir=tmp_path)
+    assert cfg.heartbeat.interval == 60
+    assert cfg.heartbeat.downtime_hour == 11
+    assert cfg.heartbeat.downtime_minutes == 20
+    assert cfg.uptime_kuma_push_url is None
+
+
+def test_uptime_kuma_push_url_from_env(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "missing.yml",
+        env={"UPTIME_KUMA_PUSH_URL": "https://k/api/push/tok"},
+        base_dir=tmp_path,
+    )
+    assert cfg.uptime_kuma_push_url == "https://k/api/push/tok"
+
+
+def test_heartbeat_interval_from_yaml(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  interval: 30\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.heartbeat.interval == 30
+
+
+def test_heartbeat_interval_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  interval: 0\n")
+    with pytest.raises(ConfigError, match="heartbeat.interval"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_heartbeat_downtime_hour_out_of_range_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "heartbeat:\n  downtime_hour: 24\n")
+    with pytest.raises(ConfigError, match="heartbeat.downtime_hour"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_refresh_work_mem_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.refresh.work_mem == "512MB"
+    yaml_path = write_yaml(tmp_path, "refresh:\n  work_mem: 1GB\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.refresh.work_mem == "1GB"
+
+
+def test_refresh_work_mem_invalid_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "refresh:\n  work_mem: not-a-size\n")
+    with pytest.raises(ConfigError, match="refresh.work_mem"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_zkb_killmail_url_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert (
+        default_cfg.sources.zkb_killmail_url
+        == "https://zkillboard.com/api/killID/{killmail_id}/"
+    )
+    yaml_path = write_yaml(
+        tmp_path,
+        "sources:\n  zkb_killmail_url: https://example.test/k/{killmail_id}/\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.sources.zkb_killmail_url == "https://example.test/k/{killmail_id}/"
+
+
+def test_streaming_max_length_above_max_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "streaming:\n  stream_max_length: 10000\n")
+    with pytest.raises(ConfigError, match="stream_max_length"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_invalidate_channel_default_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.streaming.invalidate_channel == "cache:invalidate"
+
+    yaml_path = write_yaml(tmp_path, "streaming:\n  invalidate_channel: cache:flush\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.streaming.invalidate_channel == "cache:flush"
+
+
+def test_metrics_defaults_and_override(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.metrics.enabled is False
+    assert default_cfg.metrics.host == "0.0.0.0"
+    assert default_cfg.metrics.port == 9108
+
+    yaml_path = write_yaml(tmp_path, "metrics:\n  enabled: true\n")
+    cfg = load_config(
+        yaml_path=yaml_path,
+        env={"METRICS_HOST": "127.0.0.1", "METRICS_PORT": "9200"},
+        base_dir=tmp_path,
+    )
+    assert cfg.metrics.enabled is True
+    assert cfg.metrics.host == "127.0.0.1"
+    assert cfg.metrics.port == 9200
+
+
+def test_metrics_invalid_port_raises(tmp_path):
+    with pytest.raises(ConfigError, match="METRICS_PORT"):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "70000"},
+            base_dir=tmp_path,
+        )
+
+
+def test_metrics_non_numeric_port_raises(tmp_path):
+    with pytest.raises(ConfigError, match="METRICS_PORT"):
+        load_config(
+            yaml_path=tmp_path / "x.yml",
+            env={"METRICS_PORT": "abc"},
+            base_dir=tmp_path,
+        )
+
+
+def test_require_database_url_raises_when_missing(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    with pytest.raises(ConfigError, match="DATABASE_URL"):
+        require_database_url(cfg)
+
+
+def test_require_database_url_returns_value(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"DATABASE_URL": "postgresql://u:p@h/db"},
+        base_dir=tmp_path,
+    )
+    assert require_database_url(cfg) == "postgresql://u:p@h/db"
+
+
+def test_setup_logging_applies_level(tmp_path):
+    cfg = load_config(
+        yaml_path=tmp_path / "x.yml",
+        env={"LOG_LEVEL": "DEBUG", "LOG_FILE": str(tmp_path / "app.log")},
+        base_dir=tmp_path,
+    )
+    root = logging.getLogger()
+    original_level = root.level
+    original_handlers = root.handlers[:]
+    try:
+        setup_logging(cfg)
+        assert root.level == logging.DEBUG
+    finally:
+        for handler in root.handlers[:]:
+            handler.close()
+        root.handlers[:] = original_handlers
+        root.setLevel(original_level)
+
+
+def test_esi_entity_source_urls_have_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.sources.esi_names_url == "https://esi.evetech.net/universe/names/"
+    assert (
+        cfg.sources.esi_corporation_url
+        == "https://esi.evetech.net/corporations/{corporation_id}/"
+    )
+    assert (
+        cfg.sources.esi_alliance_url
+        == "https://esi.evetech.net/alliances/{alliance_id}/"
+    )
+    assert cfg.sources.esi_factions_url == "https://esi.evetech.net/universe/factions/"
+    assert cfg.sources.esi_war_url == "https://esi.evetech.net/wars/{war_id}/"
+
+
+def test_enrichment_sections_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.entities.refresh_after_days == 30
+    assert cfg.entities.resolve_timeout == pytest.approx(10.0)
+    assert cfg.entities.max_concurrency == 10
+    assert cfg.entities.backlog_interval == 60
+    assert cfg.wars.enabled is True
+    assert cfg.wars.interval == 60
+    assert cfg.wars.batch_size == 100
+    assert cfg.factions.refresh_days == 7
+
+
+def test_enrichment_sections_override(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path,
+        """
+        entities:
+          refresh_after_days: 90
+          max_concurrency: 4
+        wars:
+          enabled: false
+        factions:
+          refresh_days: 14
+        """,
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.entities.refresh_after_days == 90
+    assert cfg.entities.max_concurrency == 4
+    assert cfg.entities.resolve_timeout == pytest.approx(10.0)
+    assert cfg.wars.enabled is False
+    assert cfg.factions.refresh_days == 14
+
+
+def test_entities_invalid_concurrency_raises(tmp_path):
+    yaml_path = write_yaml(tmp_path, "entities:\n  max_concurrency: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_facets_disabled_by_default_and_toggleable(tmp_path):
+    default_cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert default_cfg.facets.enabled is False
+
+    yaml_path = write_yaml(tmp_path, "facets:\n  enabled: true\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.facets.enabled is True
+
+
+def test_corporations_defaults(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.corporations.enabled is True
+    assert cfg.corporations.interval == 60
+    assert cfg.corporations.batch_size == 250
+    assert cfg.corporations.max_concurrency == 10
+
+
+def test_corporations_yaml_overrides(tmp_path):
+    yaml_path = write_yaml(
+        tmp_path,
+        "corporations:\n  enabled: false\n  interval: 30\n  batch_size: 500\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.corporations.enabled is False
+    assert cfg.corporations.interval == 30
+    assert cfg.corporations.batch_size == 500
+    assert cfg.corporations.max_concurrency == 10
+
+
+def test_corporations_interval_min_validated(tmp_path):
+    yaml_path = write_yaml(tmp_path, "corporations:\n  interval: 0\n")
+    with pytest.raises(ConfigError):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leaderboard_defaults_and_override(tmp_path):
+    cfg = load_config(yaml_path=tmp_path / "x.yml", env={}, base_dir=tmp_path)
+    assert cfg.leaderboard.enabled is True
+    assert cfg.leaderboard.top_n == 25
+    assert cfg.leaderboard.player_factions == (
+        500001,
+        500002,
+        500003,
+        500004,
+        500010,
+        500011,
+    )
+
+    yaml_path = write_yaml(
+        tmp_path,
+        "leaderboard:\n  enabled: false\n  top_n: 100\n  player_factions: [500001, 500099]\n",
+    )
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.leaderboard.enabled is False
+    assert cfg.leaderboard.top_n == 100
+    assert cfg.leaderboard.player_factions == (500001, 500099)
+
+
+def test_leaderboard_top_n_must_be_positive(tmp_path):
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  top_n: 0\n")
+    with pytest.raises(ConfigError, match="leaderboard.top_n"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leaderboard_top_n_must_fit_smallint(tmp_path):
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  top_n: 1001\n")
+    with pytest.raises(ConfigError, match="leaderboard.top_n"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+
+
+def test_leaderboard_player_factions_may_be_empty(tmp_path):
+    yaml_path = write_yaml(tmp_path, "leaderboard:\n  player_factions: []\n")
+    cfg = load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)
+    assert cfg.leaderboard.player_factions == ()
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "500001",
+        "[500001, x]",
+        "[500001, true]",
+        "[500001, 0]",
+    ],
+)
+def test_leaderboard_player_factions_validation(tmp_path, value):
+    yaml_path = write_yaml(tmp_path, f"leaderboard:\n  player_factions: {value}\n")
+    with pytest.raises(ConfigError, match="leaderboard.player_factions"):
+        load_config(yaml_path=yaml_path, env={}, base_dir=tmp_path)

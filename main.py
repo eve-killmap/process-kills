@@ -1,0 +1,102 @@
+import argparse
+import asyncio
+import logging
+import signal
+import sys
+from types import FrameType
+
+from config import ConfigError, config, require_database_url, setup_logging
+from db import get_connection_with_retry, init_schema
+from esi import ESIClient
+from live import live_listener
+import metrics
+import stream as kill_stream
+from crosscheck import crosscheck_scheduler
+from mv_refresh import fast_refresh_scheduler, slow_refresh_scheduler
+import entities
+import wars
+import corporations
+import factions
+import heartbeat
+
+logger = logging.getLogger(__name__)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="EVE Killmap kill-ingestion service (live listener, "
+        "cross-checker, and view refresh)."
+    )
+    return parser.parse_args()
+
+
+async def main() -> None:
+    setup_logging(config)
+
+    logger.info("EVE Killmap DB service starting...")
+
+    try:
+        require_database_url(config)
+    except ConfigError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+    metrics.start_metrics_server(config)
+
+    logger.info("Initializing database schema...")
+    with get_connection_with_retry() as conn:
+        init_schema(conn)
+
+    shutdown_event = asyncio.Event()
+
+    def handle_signal(sig: int, _frame: FrameType | None) -> None:
+        logger.info(f"Received signal {sig}, shutting down...")
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    esi_client = ESIClient(shutdown_event)
+    await esi_client.start()
+
+    redis_client = None
+    if config.redis_url:
+        try:
+            redis_client = await kill_stream.connect_redis()
+            logger.info("Connected to Redis stream.")
+        except Exception as e:
+            logger.warning(
+                f"Could not connect to Redis ({e}). Live kills will not be streamed."
+            )
+    metrics.redis_connected.set(1 if redis_client is not None else 0)
+
+    tasks = [
+        live_listener(shutdown_event, redis=redis_client, esi=esi_client),
+        crosscheck_scheduler(esi_client, shutdown_event),
+        fast_refresh_scheduler(shutdown_event, redis=redis_client),
+        slow_refresh_scheduler(shutdown_event, redis=redis_client),
+        entities.entity_backlog_scheduler(esi_client, shutdown_event),
+        wars.war_scheduler(esi_client, shutdown_event),
+        corporations.corporation_refresh_scheduler(esi_client, shutdown_event),
+        factions.faction_scheduler(esi_client, shutdown_event),
+        heartbeat.heartbeat_scheduler(shutdown_event),
+    ]
+    logger.info(
+        "Service started. Running live listener, cross-checker, and view refresh."
+    )
+
+    try:
+        await asyncio.gather(*tasks)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        logger.info("Shutting down ESI client...")
+        await esi_client.close()
+        if redis_client:
+            await redis_client.aclose()
+        logger.info("Service stopped.")
+
+
+if __name__ == "__main__":
+    parse_args()
+    asyncio.run(main())

@@ -1,4 +1,4 @@
-# process-kills
+# EVE Killmap Kill Processing
 
 The killmail processing service behind [EVE Killmap](https://eve-killmap.com). It listens to zKillboard's live feed, fetches each killmail from ESI, and writes it to the shared PostgreSQL database. It also performs cross-checking against zKillboard's per-day totals to backfill anything missed, resolves entity names, and maintains the derived tables (kill facets, daily rollups, leaderboards and materialized views) that the [backend](https://github.com/eve-killmap/backend) serves to the [frontend](https://github.com/eve-killmap/frontend).
 
